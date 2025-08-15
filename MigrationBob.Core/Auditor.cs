@@ -36,23 +36,23 @@ public static class Auditor
 
         string title = await page.TitleAsync();
         bool hasTitle = !string.IsNullOrWhiteSpace(title);
-        result.Checks.Add(new("Meta title existuje", hasTitle, hasTitle ? $"Title: \"{title}\"" : "Nenalezeno"));
+        result.Checks.Add(new("Meta title existuje", hasTitle, hasTitle ? $"Title: \"{title}\"" : "Není!"));
         if (hasTitle)
             result.Checks.Add(new("Délka title 10–70", title.Length is >= 10 and <= 70, $"Délka: {title.Length}"));
 
         string? metaDesc = await FirstContentSafeAsync(page, "meta[name='description']");
         bool hasDesc = !string.IsNullOrWhiteSpace(metaDesc);
-        result.Checks.Add(new("Meta description existuje", hasDesc, hasDesc ? $"Description: \"{metaDesc}\"" : "Nenalezeno"));
+        result.Checks.Add(new("Meta description existuje", hasDesc, hasDesc ? $"Description: \"{metaDesc}\"" : "Není!"));
         if (hasDesc)
             result.Checks.Add(new("Délka description 50–160", metaDesc!.Length is >= 50 and <= 160, $"Délka: {metaDesc.Length}"));
 
         string? metaKeywords = await FirstContentSafeAsync(page, "meta[name='keywords']");
         bool hasKeywords = !string.IsNullOrWhiteSpace(metaKeywords);
-        result.Checks.Add(new("Meta keywords existují", hasKeywords, hasKeywords ? $"Keywords: \"{metaKeywords}\"" : "Nenalezeno"));
+        result.Checks.Add(new("Meta keywords existují", hasKeywords, hasKeywords ? $"Keywords: \"{metaKeywords}\"" : "Není!"));
 
         string? h1 = await TextContentSafeAsync(page, "h1");
         bool hasH1 = !string.IsNullOrWhiteSpace(h1);
-        result.Checks.Add(new("H1 existuje a není prázdné", hasH1, hasH1 ? $"H1: \"{CollapseWs(h1!)}\"" : "Nenalezeno"));
+        result.Checks.Add(new("H1 existuje a není prázdnej", hasH1, hasH1 ? $"H1: \"{CollapseWs(h1!)}\"" : "Není!"));
 
         int h1Count = await CountAsync(page, "h1");
         result.Checks.Add(new("Počet H1 = 1", h1Count == 1, $"Počet H1: {h1Count}"));
@@ -67,7 +67,7 @@ public static class Auditor
         }
         else
         {
-            result.Checks.Add(new("og:image existuje", false, "Nenalezeno"));
+            result.Checks.Add(new("og:image existuje", false, "Není!"));
         }
 
         int badBtns = await page.EvaluateAsync<int>(
