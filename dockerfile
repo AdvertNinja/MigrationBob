@@ -10,7 +10,7 @@ RUN dotnet restore MigrationBob.Api/MigrationBob.Api.csproj
 RUN dotnet publish MigrationBob.Api/MigrationBob.Api.csproj -c Release -o /app/publish
 
 
-FROM mcr.microsoft.com/playwright/dotnet:v1.46.0-jammy
+FROM mcr.microsoft.com/playwright/dotnet:v1.54.0-jammy 
 WORKDIR /app
 
 
