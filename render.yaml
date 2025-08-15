@@ -11,8 +11,3 @@ services:
         value: "8080"
       - key: FRONTEND_ORIGINS
         value: https://cemex.advert.ninja,http://localhost:5173
-    pullRequestPreviewsEnabled: true
-    previewPlan: free
-    previewEnvVars:
-      - key: FRONTEND_ORIGINS
-        value: http://localhost:5173
