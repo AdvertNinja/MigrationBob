@@ -1,67 +1,122 @@
-﻿using System;
-using System.IO;
-using System.Linq;
-using System.Collections.Generic;
+﻿using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Net.Http.Json;
 using MigrationBob.Core;
 
-class Program
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+builder.Services.AddHttpClient();
+
+var app = builder.Build();
+app.UseCors();
+
+var jobs = new ConcurrentDictionary<string, BulkJob>();
+
+app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
 {
-    static async Task<int> Main(string[] args)
+    if (string.IsNullOrWhiteSpace(country))
+        return Results.BadRequest(new { error = "missing_country" });
+
+    var job = new BulkJob(country.ToUpperInvariant());
+    jobs[job.Id] = job;
+
+    _ = Task.Run(async () =>
     {
-        var inputPathArg = GetArg(args, "--input") ?? "seznam.txt";
-        if (!File.Exists(inputPathArg))
+        try
         {
-            Console.Error.WriteLine($"Soubor nenalezen: {inputPathArg}");
-            return 1;
+            job.Status = "running";
+
+            var http = f.CreateClient();
+            var listUrl = $"https://cemex.advert.ninja/tools/MigrationBob/mvp-audit/{job.Country.ToLower()}/seznam.txt";
+            var listText = await http.GetStringAsync(listUrl);
+
+            var urls = listText.Split('\n', '\r', StringSplitOptions.RemoveEmptyEntries)
+                               .Select(s => s.Trim())
+                               .Where(s => s.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                               .Distinct()
+                               .ToList();
+
+            job.Total = urls.Count;
+
+            var results = new List<AuditResult>();
+            using var sem = new SemaphoreSlim(6);
+            var tasks = urls.Select(async u =>
+            {
+                await sem.WaitAsync();
+                try
+                {
+                    var r = await Auditor.AuditAsync(u);
+                    lock (results) results.Add(r);
+                    Interlocked.Increment(ref job.Done);
+                }
+                catch (Exception ex)
+                {
+                    lock (results)
+                    {
+                        var ar = new AuditResult { Url = new Uri(u) };
+                        ar.Checks.Add(new("Unhandled error", false, ex.Message));
+                        results.Add(ar);
+                    }
+                    Interlocked.Increment(ref job.Done);
+                }
+                finally { sem.Release(); }
+            }).ToList();
+
+            await Task.WhenAll(tasks);
+
+            var ts = DateTime.Now.ToString("dd-MM-yyyy-HH-mm");
+            var fileName = $"BobAudit-{job.Country}-{ts}.json";
+            var content = JsonSerializer.Serialize(results, new JsonSerializerOptions { WriteIndented = true });
+
+            var uploadEndpoint = "https://cemex.advert.ninja/tools/MigrationBob/save-audit.php";
+            var payload = new { country = job.Country, filename = fileName, content };
+            var resp = await http.PostAsJsonAsync(uploadEndpoint, payload);
+            resp.EnsureSuccessStatusCode();
+            var saved = await resp.Content.ReadFromJsonAsync<SaveResp>() ?? new SaveResp();
+
+            job.OutputUrl = saved.url ?? $"https://cemex.advert.ninja/tools/MigrationBob/mvp-audit/{job.Country}/audity/{fileName}";
+            job.Status = "done";
         }
-
-        var inputPath = Path.GetFullPath(inputPathArg);
-        var countryDir = Path.GetDirectoryName(inputPath)!;
-        var country = new DirectoryInfo(countryDir).Name.ToUpperInvariant();
-        var audityDir = Path.Combine(countryDir, "audity");
-        Directory.CreateDirectory(audityDir);
-
-        var ts = DateTime.Now.ToString("dd-MM-yyyy-HH-mm");
-        var outJson = GetArg(args, "--out") ?? Path.Combine(audityDir, $"BobAudit-{country}-{ts}.json");
-
-        var urls = (await File.ReadAllLinesAsync(inputPath))
-            .Select(l => l.Trim())
-            .Where(l => !string.IsNullOrWhiteSpace(l) && l.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-            .Distinct()
-            .ToList();
-
-        Console.WriteLine($"Načteno {urls.Count} URL.");
-
-        var results = new List<AuditResult>();
-        int i = 0;
-
-        foreach (var url in urls)
+        catch (Exception ex)
         {
-            Console.WriteLine($"[{++i}/{urls.Count}] {url}");
-            try
-            {
-                var r = await Auditor.AuditAsync(url);
-                results.Add(r);
-
-                var ok = r.Checks.Count(c => c.Ok);
-                var total = r.Checks.Count;
-                Console.WriteLine($"   ✓ {ok}/{total}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"   ERROR: {ex.Message}");
-                results.Add(new AuditResult { Url = new Uri(url) });
-            }
+            job.Error = ex.Message;
+            job.Status = "error";
         }
+    });
 
-        var json = JsonSerializer.Serialize(results, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(outJson, json);
-        Console.WriteLine($"Hotovo → {outJson}");
-        return 0;
-    }
+    return Results.Ok(new { jobId = job.Id, mode = "bulk" });
+});
 
-    static string? GetArg(string[] args, string key)
-        => args.FirstOrDefault(a => a.StartsWith(key + "=", StringComparison.OrdinalIgnoreCase))
-              ?.Split('=', 2)[1];
+app.MapGet("/bulk/status/{id}", (string id) =>
+{
+    if (!jobs.TryGetValue(id, out var job))
+        return Results.NotFound(new { error = "not_found" });
+
+    return Results.Ok(new
+    {
+        job.Id,
+        job.Country,
+        job.Status,
+        job.Total,
+        job.Done,
+        job.OutputUrl,
+        job.Error
+    });
+});
+
+app.MapGet("/healthz", () => Results.Ok("OK"));
+app.Run();
+
+class BulkJob
+{
+    public string Id { get; } = Guid.NewGuid().ToString("n");
+    public string Country { get; }
+    public string Status { get; set; } = "queued";
+    public int Total { get; set; }
+    public int Done { get; set; }
+    public string? OutputUrl { get; set; }
+    public string? Error { get; set; }
+    public BulkJob(string country) { Country = country; }
 }
+
+record SaveResp(string? status = null, string? url = null);

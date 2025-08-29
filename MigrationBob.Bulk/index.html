@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8" />
+  <title>MigrationBob | Bulk auditor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./../styly.css">
+</head>
+<body>
+  <div class="container">
+    <img class="hero" src="https://cemex.advert.ninja/tools/MigrationBob/migrationbob-300x300.webp" alt="MigrationBob">
+    <h1>Migration Bob — Bulk</h1>
+    <p class="lead">Audit celého webu po zemi</p>
+
+    <form id="bulkForm" class="stack">
+      <label for="country" class="small muted">Země</label>
+      <select id="country" required>
+        <option value="CZE">CZE</option>
+        <option value="FRA">FRA</option>
+        <option value="ESP">ESP</option>
+        <option value="DEU">DEU</option>
+        <option value="POL">POL</option>
+        <option value="SVK">SVK</option>
+        <option value="HUN">HUN</option>
+      </select>
+      <button id="runBulkBtn" type="submit">Run Bulk Audit</button>
+    </form>
+
+    <div id="bulkStatus" class="status"></div>
+    <div id="bulkProgress" class="small mono"></div>
+    <div id="bulkLink" class="small"></div>
+
+    <ul id="jarvisLog"></ul>
+  </div>
+
+<script>
+  // Protože je tahle stránka servírovaná přímo z bulk služby,
+  // voláme API relativně ke stejnému originu.
+  const API = ''; // stejné jako window.location.origin
+
+  const bulkForm = document.getElementById('bulkForm');
+  const countrySel = document.getElementById('country');
+  const runBulkBtn = document.getElementById('runBulkBtn');
+  const bulkStatus = document.getElementById('bulkStatus');
+  const bulkProgress = document.getElementById('bulkProgress');
+  const bulkLink = document.getElementById('bulkLink');
+  const jarvisLog = document.getElementById('jarvisLog');
+
+  function logJarvis(message, detail='') {
+    const li = document.createElement('li');
+    li.textContent = message + (detail ? ' ' + detail : '');
+    jarvisLog.appendChild(li);
+    console.log('%cJarvis:', 'background:#fff;color:#000;padding:4px 6px;border-radius:4px;font-weight:600;font-family:Poppins,sans-serif;', message, detail);
+  }
+
+  function setBusy(busy, msg='') {
+    runBulkBtn.disabled = busy;
+    bulkStatus.innerHTML = busy ? `<span class="spinner"></span>${msg || 'Pracuji…'}` : (msg || '');
+  }
+
+  async function startBulk(country) {
+    // POST /bulk/run?country=CZE
+    const url = `${API}/bulk/run?country=${encodeURIComponent(country)}`;
+    const r = await fetch(url, { method: 'POST' });
+    if (!r.ok) throw new Error(`Start failed: HTTP ${r.status}`);
+    return r.json();
+  }
+
+  async function getStatus(jobId) {
+    // GET /bulk/status/{id}
+    const url = `${API}/bulk/status/${encodeURIComponent(jobId)}`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`Status failed: HTTP ${r.status}`);
+    return r.json();
+  }
+
+  bulkForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const country = countrySel.value;
+
+    bulkLink.textContent = '';
+    bulkProgress.textContent = '';
+    setBusy(true, `Spouštím bulk audit pro ${country}…`);
+    logJarvis('Bulk start', country);
+
+    try {
+      const start = await startBulk(country);
+      const jobId = start.jobId;
+      if (!jobId) throw new Error('Missing jobId');
+
+      setBusy(true, 'Audit běží…');
+      let done = false;
+      while (!done) {
+        await new Promise(res => setTimeout(res, 2000));
+        const s = await getStatus(jobId);
+
+        const total = s.total ?? 0;
+        const doneCnt = s.done ?? 0;
+        const pct = total > 0 ? Math.round((doneCnt / total) * 100) : 0;
+
+        bulkStatus.textContent = `Status: ${s.status || 'unknown'}`;
+        bulkProgress.textContent = total ? `Progress: ${doneCnt}/${total} (${pct}%)` : '';
+
+        if (s.status === 'done') {
+          done = true;
+          setBusy(false, 'Hotovo.');
+          const link = s.outputUrl;
+          bulkLink.innerHTML = link ? `Výsledek: <a href="${link}" target="_blank">${link}</a>` : 'Výsledný soubor není k dispozici.';
+          logJarvis('Bulk done', link || '');
+        }
+        if (s.status === 'error') {
+          done = true;
+          setBusy(false, 'Chyba při běhu auditu.');
+          bulkLink.textContent = s.error || 'Unknown error';
+          logJarvis('Bulk error', s.error || '');
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      setBusy(false, 'Nepodařilo se spustit bulk audit.');
+      logJarvis('Bulk start failed', err?.message || String(err));
+    }
+  });
+</script>
+</body>
+</html>
