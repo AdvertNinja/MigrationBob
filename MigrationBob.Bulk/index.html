@@ -35,9 +35,7 @@
   </div>
 
 <script>
-  // Protože je tahle stránka servírovaná přímo z bulk služby,
-  // voláme API relativně ke stejnému originu.
-  const API = ''; // stejné jako window.location.origin
+  const API = '';
 
   const bulkForm = document.getElementById('bulkForm');
   const countrySel = document.getElementById('country');
@@ -60,7 +58,6 @@
   }
 
   async function startBulk(country) {
-    // POST /bulk/run?country=CZE
     const url = `${API}/bulk/run?country=${encodeURIComponent(country)}`;
     const r = await fetch(url, { method: 'POST' });
     if (!r.ok) throw new Error(`Start failed: HTTP ${r.status}`);
@@ -68,7 +65,6 @@
   }
 
   async function getStatus(jobId) {
-    // GET /bulk/status/{id}
     const url = `${API}/bulk/status/${encodeURIComponent(jobId)}`;
     const r = await fetch(url);
     if (!r.ok) throw new Error(`Status failed: HTTP ${r.status}`);
