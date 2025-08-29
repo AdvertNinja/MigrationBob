@@ -1,6 +1,13 @@
-using Microsoft.Playwright;
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Playwright;
 
 namespace MigrationBob.Core;
 
@@ -36,32 +43,33 @@ public static class Auditor
 
         result.Checks.Add(new("Page returns 200 OK", nav?.Status == 200, $"Status: {(nav?.Status.ToString() ?? "null")}"));
 
-        string title = await page.TitleAsync();
-        bool hasTitle = !string.IsNullOrWhiteSpace(title);
+        var title = await page.TitleAsync();
+        var hasTitle = !string.IsNullOrWhiteSpace(title);
         result.Checks.Add(new("Title exists", hasTitle, hasTitle ? $"Title: \"{title}\"" : "Missing"));
         result.Checks.Add(new("Title length 10–70", hasTitle && title.Length is >= 10 and <= 70, $"Length: {title?.Length ?? 0}"));
 
-        string? metaDesc = await FirstContentSafeAsync(page, "meta[name='description']");
-        bool hasDesc = !string.IsNullOrWhiteSpace(metaDesc);
+        var metaDesc = await FirstContentSafeAsync(page, "meta[name='description']");
+        var hasDesc = !string.IsNullOrWhiteSpace(metaDesc);
         result.Checks.Add(new("Meta description exists", hasDesc, hasDesc ? $"Description: \"{CollapseWs(metaDesc!)}\"" : "Missing"));
         result.Checks.Add(new("Description length 50–160", hasDesc && metaDesc!.Length is >= 50 and <= 160, $"Length: {metaDesc?.Length ?? 0}"));
 
-        string? metaKeywords = await FirstContentSafeAsync(page, "meta[name='keywords']");
-        bool hasKeywords = !string.IsNullOrWhiteSpace(metaKeywords);
-        result.Checks.Add(new("Meta keywords exist", hasKeywords, hasKeywords ? $"Keywords present" : "Missing"));
+        var metaKeywords = await FirstContentSafeAsync(page, "meta[name='keywords']");
+        var hasKeywords = !string.IsNullOrWhiteSpace(metaKeywords);
+        result.Checks.Add(new("Meta keywords exist", hasKeywords, hasKeywords ? "Keywords present" : "Missing"));
 
-        string? h1 = await TextContentSafeAsync(page, "h1");
-        bool hasH1 = !string.IsNullOrWhiteSpace(h1);
+        var h1 = await TextContentSafeAsync(page, "h1");
+        var hasH1 = !string.IsNullOrWhiteSpace(h1);
         result.Checks.Add(new("H1 exists and is not empty", hasH1, hasH1 ? $"H1: \"{CollapseWs(h1!)}\"" : "Missing"));
 
-        int h1Count = await CountAsync(page, "h1");
+        var h1Count = await CountAsync(page, "h1");
         result.Checks.Add(new("Exactly one H1", h1Count == 1, $"H1 count: {h1Count}"));
 
-        string? ogImage = await FirstContentSafeAsync(page, "meta[property='og:image']");
+        var ogImage = await FirstContentSafeAsync(page, "meta[property='og:image']");
         if (!string.IsNullOrWhiteSpace(ogImage))
         {
             var ogResolved = MakeAbsolute(uri, ogImage!);
-            bool ogOk = await UrlOkAsync(http, ogResolved, timeoutSec);
+            using var ogCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSec));
+            var ogOk = await UrlOkFastAsync(http, ogResolved, ogCts.Token);
             result.Checks.Add(new("og:image exists", true, ogImage!));
             result.Checks.Add(new("og:image returns 200", ogOk, $"URL: {ogResolved}"));
         }
@@ -71,7 +79,7 @@ public static class Auditor
             result.Checks.Add(new("og:image returns 200", false, "No og:image to check"));
         }
 
-        int badBtns = await page.EvaluateAsync<int>(
+        var badBtns = await page.EvaluateAsync<int>(
             @"() => Array.from(document.querySelectorAll('[class*=""btn""]'))
                   .filter(el => {
                       const h = (el.getAttribute('href')||'').trim();
@@ -85,13 +93,16 @@ public static class Auditor
             .Where(u => u.IndexOf("placeholder", StringComparison.OrdinalIgnoreCase) >= 0)
             .Take(10)
             .ToList();
-        bool noPlaceholders = placeholders.Count == 0;
-        result.Checks.Add(new("No placeholder images on page", noPlaceholders,
-            noPlaceholders ? "OK" : $"Found {placeholders.Count} e.g. {string.Join(", ", placeholders)}"));
+        var noPlaceholders = placeholders.Count == 0;
+        result.Checks.Add(new("No placeholder images on page", noPlaceholders, noPlaceholders ? "OK" : $"Found {placeholders.Count} e.g. {string.Join(", ", placeholders)}"));
 
-        var (brokenCount, brokenSamples) = await CheckInternalLinksAsync(http, page, uri, timeoutSec, maxToCheck: 50);
-        result.Checks.Add(new("No broken internal links", brokenCount == 0,
-            brokenCount == 0 ? "OK" : $"Broken: {brokenCount} e.g. {string.Join(", ", brokenSamples)}"));
+        var (brokenCount, brokenSamples) = await CheckInternalLinksFastAsync(
+            http, page, uri,
+            perLinkTimeoutMs: 6000,
+            maxToCheck: 30,
+            maxParallel: 6,
+            totalCapMs: 15000);
+        result.Checks.Add(new("No broken internal links", brokenCount == 0, brokenCount == 0 ? "OK" : $"Broken: {brokenCount} e.g. {string.Join(", ", brokenSamples)}"));
 
         return result;
     }
@@ -119,22 +130,6 @@ public static class Auditor
         => string.IsNullOrWhiteSpace(maybeRelative) ? maybeRelative
            : (LooksLikeAbsolute(maybeRelative) ? maybeRelative : new Uri(baseUri, maybeRelative).ToString());
 
-    static async Task<bool> UrlOkAsync(HttpClient http, string url, int timeoutSec)
-    {
-        try
-        {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSec));
-            using var resp = await http.SendAsync(new HttpRequestMessage(HttpMethod.Head, url), cts.Token);
-            if (resp.StatusCode == HttpStatusCode.MethodNotAllowed || resp.StatusCode == HttpStatusCode.NotFound)
-            {
-                using var resp2 = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-                return (int)resp2.StatusCode < 400;
-            }
-            return (int)resp.StatusCode < 400;
-        }
-        catch { return false; }
-    }
-
     static string CollapseWs(string s) => Regex.Replace(s, @"\s+", " ").Trim();
 
     static async Task<List<string>> CollectAllImageUrlsAsync(IPage page)
@@ -142,12 +137,10 @@ public static class Auditor
         var urls = await page.EvaluateAsync<string[]>(
         @"() => {
             const out = new Set();
-
             document.querySelectorAll('img[src]').forEach(img => {
                 const s = img.getAttribute('src');
                 if (s) out.add(s);
             });
-
             document.querySelectorAll('img[srcset], source[srcset], picture source[srcset]').forEach(el => {
                 const ss = el.getAttribute('srcset') || '';
                 ss.split(',').forEach(part => {
@@ -155,14 +148,15 @@ public static class Auditor
                     if (u) out.add(u);
                 });
             });
-
-            const elems = Array.from(document.querySelectorAll('*'));
+            const MAX_BG = 300;
+            const elems = Array.from(document.querySelectorAll('*')).slice(0, MAX_BG);
             for (const el of elems) {
                 const bg = getComputedStyle(el).backgroundImage;
                 if (bg && bg.includes('url(')) {
-                    const matches = bg.match(/url\((?:\"|\'|)(.*?)(?:\"|\'|)\)/g) || [];
+                    const matches = bg.match(/url\(([^)]+)\)/g) || [];
                     for (const m of matches) {
-                        const u = m.replace(/^url\((?:\"|\'|)(.*?)(?:\"|\'|)\)$/, '$1');
+                        let u = m.replace(/^url\(([^)]+)\)$/, '$1').trim();
+                        u = u.replace(/^['\x22]|['\x22]$/g, '');
                         if (u) out.add(u);
                     }
                 }
@@ -175,39 +169,79 @@ public static class Auditor
             .ToList();
     }
 
-    static async Task<(int brokenCount, List<string> samples)> CheckInternalLinksAsync(
-        HttpClient http, IPage page, Uri pageUri, int timeoutSec, int maxToCheck = 50)
+    static async Task<(int brokenCount, List<string> samples)> CheckInternalLinksFastAsync(
+        HttpClient http, IPage page, Uri pageUri, int perLinkTimeoutMs, int maxToCheck, int maxParallel, int totalCapMs)
     {
         var hrefs = await page.EvaluateAsync<string[]>(
         @"() => Array.from(document.querySelectorAll('a[href]'))
             .map(a => a.getAttribute('href') || '')
             .filter(h => h && h.trim() !== '')");
 
-        var filtered = hrefs
+        var links = hrefs
             .Select(h => h.Trim())
-            .Where(h => !h.StartsWith("#") &&
-                        !h.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase) &&
-                        !h.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase) &&
-                        !h.StartsWith("tel:", StringComparison.OrdinalIgnoreCase))
+            .Where(h => !h.StartsWith("#")
+                     && !h.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase)
+                     && !h.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase)
+                     && !h.StartsWith("tel:", StringComparison.OrdinalIgnoreCase))
             .Select(h => LooksLikeAbsolute(h) ? h : new Uri(pageUri, h).ToString())
             .Where(abs => Uri.TryCreate(abs, UriKind.Absolute, out var u) && u.Host.Equals(pageUri.Host, StringComparison.OrdinalIgnoreCase))
             .Distinct()
             .Take(maxToCheck)
             .ToList();
 
+        using var totalCts = new CancellationTokenSource(totalCapMs);
+        using var sem = new SemaphoreSlim(maxParallel);
+
         int broken = 0;
-        var samples = new List<string>();
+        var bag = new ConcurrentBag<string>();
 
-        foreach (var link in filtered)
+        var tasks = links.Select(async link =>
         {
-            var ok = await UrlOkAsync(http, link, timeoutSec);
-            if (!ok)
+            await sem.WaitAsync(totalCts.Token).ConfigureAwait(false);
+            try
             {
-                broken++;
-                if (samples.Count < 5) samples.Add(link);
+                using var perCts = CancellationTokenSource.CreateLinkedTokenSource(totalCts.Token);
+                perCts.CancelAfter(perLinkTimeoutMs);
+                var ok = await UrlOkFastAsync(http, link, perCts.Token);
+                if (!ok)
+                {
+                    Interlocked.Increment(ref broken);
+                    bag.Add(link);
+                }
             }
-        }
+            catch
+            {
+                Interlocked.Increment(ref broken);
+                bag.Add(link);
+            }
+            finally
+            {
+                sem.Release();
+            }
+        }).ToList();
 
+        await Task.WhenAll(tasks);
+        var samples = bag.Distinct().Take(5).ToList();
         return (broken, samples);
+    }
+
+    static async Task<bool> UrlOkFastAsync(HttpClient http, string url, CancellationToken ct)
+    {
+        try
+        {
+            using var head = new HttpRequestMessage(HttpMethod.Head, url);
+            head.Headers.Accept.ParseAdd("text/html,*/*;q=0.1");
+            using var resp = await http.SendAsync(head, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (resp.StatusCode == HttpStatusCode.MethodNotAllowed || resp.StatusCode == HttpStatusCode.NotFound)
+            {
+                using var resp2 = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+                return (int)resp2.StatusCode < 400;
+            }
+            return (int)resp.StatusCode < 400;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
