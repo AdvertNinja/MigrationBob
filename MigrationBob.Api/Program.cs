@@ -72,7 +72,7 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
                 {
                     var r = await Auditor.AuditAsync(u);
                     lock (results) results.Add(r);
-                    Interlocked.Increment(ref job.Done);
+                    job.IncDone();
                 }
                 catch (Exception ex)
                 {
@@ -82,7 +82,7 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
                         ar.Checks.Add(new("Unhandled error", false, ex.Message));
                         results.Add(ar);
                     }
-                    Interlocked.Increment(ref job.Done);
+                    job.IncDone();
                 }
                 finally { sem.Release(); }
             }).ToList();
@@ -132,15 +132,19 @@ app.MapGet("/bulk/status/{id}", (string id) =>
 app.Run();
 
 record AuditReq(string Url);
+
 class BulkJob
 {
     public string Id { get; } = Guid.NewGuid().ToString("n");
     public string Country { get; }
     public string Status { get; set; } = "queued";
     public int Total { get; set; }
-    public int Done { get; set; }
+    private int _done;
+    public int Done => _done;
+    public void IncDone() => Interlocked.Increment(ref _done);
     public string? OutputUrl { get; set; }
     public string? Error { get; set; }
     public BulkJob(string country) { Country = country; }
 }
+
 record SaveResp(string? status = null, string? url = null);
