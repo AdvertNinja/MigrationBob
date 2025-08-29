@@ -5,9 +5,14 @@ using MigrationBob.Core;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var originsCsv = Environment.GetEnvironmentVariable("FRONTEND_ORIGINS") ?? "https://cemex.advert.ninja";
+var originsCsv = Environment.GetEnvironmentVariable("FRONTEND_ORIGINS")
+                 ?? "https://cemex.advert.ninja,http://localhost:5173";
 var allowed = originsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.WithOrigins(allowed).AllowAnyHeader().AllowAnyMethod()));
+
+builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
+    .WithOrigins(allowed)
+    .AllowAnyHeader()
+    .AllowAnyMethod()));
 builder.Services.AddHttpClient();
 
 var app = builder.Build();
@@ -23,7 +28,9 @@ app.MapGet("/audit", async (string url) =>
 
 app.MapPost("/audit", async (AuditReq req) =>
 {
-    if (string.IsNullOrWhiteSpace(req.Url)) return Results.BadRequest(new { error = "Missing url" });
+    if (string.IsNullOrWhiteSpace(req.Url))
+        return Results.BadRequest(new { error = "Missing url" });
+
     var res = await Auditor.AuditAsync(req.Url);
     return Results.Json(res, new JsonSerializerOptions { WriteIndented = true });
 });
@@ -32,7 +39,8 @@ var jobs = new ConcurrentDictionary<string, BulkJob>();
 
 app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
 {
-    if (string.IsNullOrWhiteSpace(country)) return Results.BadRequest(new { error = "missing_country" });
+    if (string.IsNullOrWhiteSpace(country))
+        return Results.BadRequest(new { error = "missing_country" });
 
     var job = new BulkJob(country.ToUpperInvariant());
     jobs[job.Id] = job;
@@ -42,6 +50,7 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
         try
         {
             job.Status = "running";
+
             var http = f.CreateClient();
             var listUrl = $"https://cemex.advert.ninja/tools/MigrationBob/mvp-audit/{job.Country.ToLower()}/seznam.txt";
             var listText = await http.GetStringAsync(listUrl);
@@ -105,15 +114,24 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
 
 app.MapGet("/bulk/status/{id}", (string id) =>
 {
-    if (!jobs.TryGetValue(id, out var job)) return Results.NotFound(new { error = "not_found" });
+    if (!jobs.TryGetValue(id, out var job))
+        return Results.NotFound(new { error = "not_found" });
 
-    return Results.Ok(new { job.Id, job.Country, job.Status, job.Total, job.Done, job.OutputUrl, job.Error });
+    return Results.Ok(new
+    {
+        job.Id,
+        job.Country,
+        job.Status,
+        job.Total,
+        job.Done,
+        job.OutputUrl,
+        job.Error
+    });
 });
 
 app.Run();
 
 record AuditReq(string Url);
-
 class BulkJob
 {
     public string Id { get; } = Guid.NewGuid().ToString("n");

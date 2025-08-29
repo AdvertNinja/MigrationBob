@@ -1,0 +1,3 @@
+<IfModule mod_headers.c>
+Header set Content-Security-Policy "default-src 'self'; connect-src 'self' https://migrationbob-api.onrender.com; img-src 'self' data: https:; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; font-src 'self' data: https:"
+</IfModule>
