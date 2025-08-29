@@ -2,69 +2,36 @@
 <html lang="cs">
 <head>
   <meta charset="UTF-8" />
-  <title>Bob | Friendly quality controler </title>
+  <title>MigrationBob | Your friendly quality auditor</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
-  <style>
-    :root { --red:#c00; --green:#1fa17a; --text:#111; --muted:#666; }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family:Poppins,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:#fff; color:var(--text); }
-    .wrap { max-width:880px; margin:36px auto 64px; padding:0 16px; text-align:center; }
-    img.hero { width:160px; height:auto; margin:0 auto 8px; display:block; }
-    h1 { margin:6px 0 6px; font-size:32px; font-weight:700; }
-    p.lead { margin:0 0 18px; color:var(--muted); }
-    form { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin:18px 0 8px; }
-    input[type="url"] { flex:1 1 520px; padding:12px 14px; border:1px solid #ddd; border-radius:10px; outline:none; }
-    button { padding:12px 18px; border-radius:10px; border:0; background:var(--red); color:#fff; font-weight:600; cursor:pointer; }
-    button:disabled { opacity:.6; cursor:not-allowed; }
-    .status { margin-top:10px; font-size:14px; color:var(--muted); min-height:22px; }
-    .summary { margin:18px 0 6px; font-weight:600; }
-    .summary.pass { color:var(--green); }
-    .summary.fail { color:var(--red); }
-    /* log pod obrázkem */
-    ul#jarvisLog { list-style:none; margin:12px auto 6px; padding:0; max-width:520px; text-align:left; }
-    ul#jarvisLog li { margin:4px 0; font-size:14px; color:var(--muted); }
-    /* checklist */
-    ul.checks { list-style:none; margin:8px auto 0; padding:0; max-width:880px; text-align:left; }
-    ul.checks li { display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-top:1px solid #eee; }
-    ul.checks li:first-child { border-top:0; }
-    .ok { color:var(--green); font-weight:600; }
-    .bad { color:var(--red); font-weight:600; }
-    .muted { color:#888; font-size:13px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-    .small { font-size:12px; color:#888; margin-top:8px; }
-    .spinner { display:inline-block; width:16px; height:16px; border:3px solid #eee; border-top-color:#111; border-radius:50%; animation:spin 1s linear infinite; vertical-align:-3px; margin-right:8px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-  </style>
+  <link rel="stylesheet" href="./styly.css">
+  
 </head>
 <body>
-  <div class="wrap">
+  <div class="container">
     <img class="hero" src="https://cemex.advert.ninja/tools/MigrationBob/migrationbob-300x300.webp" alt="MigrationBob">
-    <h1>MigrationBob</h1>
-    <p class="lead">Zadej URL stránky, pošleme ji na Render a vrátíme checklist.</p>
-
-
-    <ul id="jarvisLog"></ul>
-
+    <h1>Migration Bob</h1>
+    <p class="lead">Your friendly quality auditor</p>
 
     <form id="auditForm">
-      <input id="urlInput" type="url" placeholder="https://example.com" required />
-      <button id="runBtn" type="submit">Analyzovat</button>
+      <input id="urlInput" type="url" placeholder="https://cxprod-web.cemex.com/cs/web/cemex-cz/produkty/kamenivo" required />
+      <button id="runBtn" type="submit">Let Bob have a look!</button>
     </form>
-    <div id="status" class="status"></div>
 
+    <div id="status" class="status"></div>
 
     <div id="result" style="display:none;">
       <div id="summary" class="summary"></div>
       <ul id="checks" class="checks"></ul>
       <div id="meta" class="small"></div>
     </div>
+
+    <ul id="jarvisLog"></ul>
   </div>
 
 <script>
-
   const API = 'https://migrationbob-api.onrender.com';
-
 
   const form   = document.getElementById('auditForm');
   const input  = document.getElementById('urlInput');
@@ -76,12 +43,10 @@
   const meta = document.getElementById('meta');
   const jarvisLog = document.getElementById('jarvisLog');
 
-
   function logJarvis(message, detail='') {
     const prefix = '%cJarvis:';
-    const style = 'background: #fff; color: #000; padding: 4px 6px; border-radius: 4px; font-weight: 600; font-family: Poppins, sans-serif;';
+    const style = 'background:#fff;color:#000;padding:4px 6px;border-radius:4px;font-weight:600;font-family:Poppins,sans-serif;';
     console.log(prefix, style, message, detail);
-
     const li = document.createElement('li');
     li.textContent = message + (detail ? ' ' + detail : '');
     jarvisLog.appendChild(li);
@@ -96,8 +61,7 @@
     const el = document.createElement('li');
     const badge = document.createElement('span');
     badge.textContent = check.Ok ? '✓' : '✗';
-    badge.className = check.Ok ? 'ok' : 'bad';
-    badge.style.minWidth = '18px';
+    badge.className = check.Ok ? 'ok' : 'není ok';
     el.appendChild(badge);
 
     const textWrap = document.createElement('div');
@@ -120,14 +84,14 @@
     let attempt = 0, lastErr;
     while (attempt < 2) {
       try {
-        logJarvis('Warming up backend…');
+        logJarvis('Posíláme noticku na Backenf');
         const r = await fetch(endpoint, { method: 'GET' });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        logJarvis('Backend responded, parsing JSON…');
+        logJarvis('Backend jede, parsujeme JSOn');
         return await r.json();
       } catch (e) {
         lastErr = e;
-        logJarvis('Backend still sleepy, retrying…');
+        logJarvis('Backend spí, tohle se změní, až to spustíme na lepčím serveru');
         attempt++;
         if (attempt < 2) await new Promise(res => setTimeout(res, 1500));
       }
@@ -140,21 +104,19 @@
     const url = input.value.trim();
     if (!url) return;
 
-  
     resultBox.style.display = 'none';
     checksUl.innerHTML = '';
     meta.textContent = '';
 
-    logJarvis('Received URL:', url);
-    setBusy(true, 'Spouštím audit…');
+    logJarvis('Máme URL:', url);
+    setBusy(true, 'Bob začal zkoumat');
 
     try {
       const data = await callAudit(url);
 
-      logJarvis('Audit hotový. Rendering UI…');
+      logJarvis('Bob má hotovo, rendrujeme UI');
 
-      
-      summary.textContent = data.AllOk ? 'PASS – vše vypadá ready ✅' : 'FAIL – něco je potřeba doladit ❌';
+      summary.textContent = data.AllOk ? 'Super, všechno splněno!' : 'Ještě je potřeba doladit pár věcí:';
       summary.className = `summary ${data.AllOk ? 'pass' : 'fail'}`;
 
       (data.Checks || []).forEach(c => checksUl.appendChild(li(c)));
@@ -169,38 +131,19 @@
       resultBox.style.display = 'block';
       setBusy(false, 'Hotovo.');
       logJarvis('Delivered! Yummy!');
-    
 
-fetch('https://cemex.advert.ninja/tools/MigrationBob/odeslani-vysledku.php', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    url: url,
-    allOk: data.AllOk,
-    result: data.Checks
-  })
-})
-.then(r => r.json())
-.then(res => {
-  if (res.status === 'success') {
-    logJarvis('Audit e-mail úspěšně odeslán!');
-  } else {
-    logJarvis('Audit e-mail se nepodařilo odeslat.');
-    console.error(res);
-  }
-})
-.catch(err => {
-  logJarvis('Chyba při odesílání e-mailu.');
-  console.error(err);
-});
-
-
-
-
+      fetch('https://cemex.advert.ninja/tools/MigrationBob/odeslani-vysledku.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, allOk: data.AllOk, result: data.Checks })
+      })
+      .then(r => r.json())
+      .then(res => logJarvis(res.status === 'success' ? 'Audit e-mail úspěšně odeslán!' : 'Audit e-mail se nepodařilo odeslat.'))
+      .catch(() => logJarvis('Chyba při odesílání e-mailu.'));
     } catch (err) {
       console.error(err);
-      logJarvis('Ouch, backend bouchnul. Zkus znovu.');
-      setBusy(false, 'Ouch, backend zahlásil chybu. Zkus to znovu za chvíli.');
+      logJarvis('Backend spadnul...');
+      setBusy(false, 'Jiná chbya backendu, to bude na render.com v logu');
     }
   });
 </script>
