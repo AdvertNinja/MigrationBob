@@ -52,7 +52,7 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
             job.Status = "running";
 
             var http = f.CreateClient();
-            var listUrl = $"https://cemex.advert.ninja/tools/MigrationBob/mvp-audit/{job.Country.ToLower()}/seznam.txt";
+var listUrl = $"https://cemex.advert.ninja/tools/MigrationBob/mvp-audit/{job.Country}/seznam.txt";
             var listText = await http.GetStringAsync(listUrl);
 
             var urls = listText.Split('\n', '\r', StringSplitOptions.RemoveEmptyEntries)
