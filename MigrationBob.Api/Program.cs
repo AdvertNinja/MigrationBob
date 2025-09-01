@@ -41,7 +41,7 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
             job.Status = "running";
             using var http = f.CreateClient();
 
-            var listUrl = $"https://cemex.advert.ninja/tools/MigrationBob/mvp-audit/{job.Country}/seznam.txt";
+            var listUrl = $"https://cemex.advert.ninja/tools/MigrationBob/mvp-audit/{job.Country.ToLowerInvariant()}/seznam.txt";
             var listText = await http.GetStringAsync(listUrl);
             var urls = Regex.Matches(listText, @"https?://[^\s]+", RegexOptions.IgnoreCase)
                             .Select(m => m.Value.Trim().TrimEnd(',', ';'))
@@ -62,12 +62,25 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
                     var r = await Auditor.AuditAsync(u);
                     results.Add(r);
 
+                    var slug = SlugFromUrl(r.Url.ToString());
+                    var checksArr = r.Checks.Select(c => c.Ok).ToArray();
+
+                    await job.Events.Writer.WriteAsync(Sse("page-start", new
+                    {
+                        index = i + 1,
+                        total = job.Total,
+                        url = r.Url.ToString(),
+                        checkTotal = r.Checks.Count,
+                        slug
+                    }));
+
                     await job.Events.Writer.WriteAsync(Sse("page", new
                     {
                         index = i + 1,
                         total = job.Total,
                         url = r.Url.ToString(),
-                        checkTotal = r.Checks.Count
+                        checkTotal = r.Checks.Count,
+                        slug
                     }));
 
                     for (int ci = 0; ci < r.Checks.Count; ci++)
@@ -90,19 +103,32 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
                         index = i + 1,
                         total = job.Total,
                         url = r.Url.ToString(),
-                        allOk = r.AllOk
+                        allOk = r.AllOk,
+                        checkTotal = r.Checks.Count,
+                        checks = checksArr,
+                        slug
                     }));
 
                     job.Done = i + 1;
                 }
                 catch (Exception ex)
                 {
+                    var slug = SlugFromUrl(u);
+                    await job.Events.Writer.WriteAsync(Sse("page-start", new
+                    {
+                        index = i + 1,
+                        total = job.Total,
+                        url = u,
+                        checkTotal = 1,
+                        slug
+                    }));
                     await job.Events.Writer.WriteAsync(Sse("page", new
                     {
                         index = i + 1,
                         total = job.Total,
                         url = u,
-                        checkTotal = 1
+                        checkTotal = 1,
+                        slug
                     }));
                     await job.Events.Writer.WriteAsync(Sse("check", new
                     {
@@ -119,7 +145,10 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
                         index = i + 1,
                         total = job.Total,
                         url = u,
-                        allOk = false
+                        allOk = false,
+                        checkTotal = 1,
+                        checks = new[] { false },
+                        slug
                     }));
 
                     var ar = new AuditResult { Url = new Uri(u) };
@@ -226,6 +255,21 @@ static string Sse(string name, object payload)
 {
     var json = JsonSerializer.Serialize(payload);
     return $"event: {name}\n" + $"data: {json}\n\n";
+}
+
+static string SlugFromUrl(string url)
+{
+    try
+    {
+        var u = new Uri(url);
+        var path = u.AbsolutePath.TrimEnd('/');
+        var norm = Regex.Replace(path, @"^/cs/web/cemex(-[a-z]{2})?/", "/cs/web/cemex$1/");
+        return string.IsNullOrEmpty(norm) ? "/" : norm;
+    }
+    catch
+    {
+        return url;
+    }
 }
 
 record AuditReq(string Url);
