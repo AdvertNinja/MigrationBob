@@ -1,195 +1,288 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="cs">
 <head>
   <meta charset="UTF-8" />
-  <title>MigrationBob | Bulk auditor</title>
+  <title>Migration Bob — Bulk</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./../styly.css">
   <style>
-    .row-card{border:1px solid #eee;border-radius:10px;padding:10px 14px;margin:14px 0;background:#fff}
-    .slug{font-family:monospace;word-break:break-all;line-height:1.25}
-    .dots{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
-    .dot{width:10px;height:10px;border-radius:50%;background:#ddd;display:inline-block}
-    .dot.ok{background:#39b54a}
-    .dot.fail{background:#e74c3c}
+    :root{--fg:#0f172a;--muted:#64748b;--ok:#22c55e;--bad:#ef4444;--dot:#d1d5db;--card:#ffffff;--bg:#f8fafc}
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--fg);font-family:Poppins,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    .container{max-width:760px;margin:0 auto;padding:32px}
+    .center{display:flex;flex-direction:column;align-items:center}
+    .hero{width:220px;height:auto;display:block;margin:10px auto 6px}
+    h1{font-size:34px;line-height:1.2;margin:6px 0 18px;text-align:center;color:#0b2ca2}
+    .lead{margin:0 0 24px;color:var(--muted);text-align:center}
+    .toolbar{display:flex;gap:12px;align-items:center;justify-content:center;margin-bottom:16px}
+    .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:#e5e7eb;color:#111827;font-weight:600}
+    .dot-s{width:10px;height:10px;border-radius:50%;background:#9ca3af}
+    .pill.ok{background:#dcfce7;color:#065f46}
+    .pill.ok .dot-s{background:var(--ok)}
+    .pill.bad{background:#fee2e2;color:#7f1d1d}
+    .pill.bad .dot-s{background:var(--bad)}
+    .pill.unknown{background:#e5e7eb;color:#111827}
+    .stack{display:flex;gap:12px;align-items:flex-end;justify-content:center;flex-wrap:wrap;margin:12px 0 14px}
+    label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+    select{appearance:none;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;min-width:92px}
+    button{appearance:none;border:0;background:#ef4444;color:#fff;font-weight:600;padding:12px 16px;border-radius:12px;cursor:pointer;transition:transform .05s ease,opacity .2s}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    button.secondary{background:#0ea5e9}
+    .status{text-align:center;min-height:20px;margin-top:6px}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
-    .muted{opacity:.7}
-    .status{min-height:24px}
+    .grid{display:flex;flex-direction:column;gap:12px;margin-top:10px;width:100%}
+    .card{background:var(--card);border-radius:14px;box-shadow:0 1px 2px rgba(15,23,42,.06),0 6px 18px rgba(2,6,23,.06);padding:12px 14px}
+    .row{display:flex;align-items:center;justify-content:space-between;gap:16px}
+    .slug{font-weight:600;color:#0f172a;font-size:14px;word-break:break-word;white-space:pre-line}
+    .dots{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+    .dot{width:12px;height:12px;border-radius:50%;background:var(--dot);box-shadow:inset 0 0 0 1px rgba(0,0,0,.04)}
+    .dot.ok{background:var(--ok)}
+    .dot.bad{background:var(--bad)}
+    .progress{color:var(--muted);font-size:12px;text-align:center;margin-top:2px}
   </style>
 </head>
 <body>
   <div class="container">
-    <img class="hero" src="https://cemex.advert.ninja/tools/MigrationBob/migrationbob-300x300.webp" alt="MigrationBob">
-    <h1>Migration Bob — Bulk</h1>
-    <p class="lead">Audit the whole country site</p>
+    <div class="center">
+      <img class="hero" src="https://cemex.advert.ninja/tools/MigrationBob/migrationbob-300x300.webp" alt="MigrationBob">
+      <h1>Migration Bob — Bulk</h1>
+      <p class="lead">Audit celého webu po zemi</p>
 
-    <form id="bulkForm" class="stack">
-      <label for="country" class="small muted">Country</label>
-      <select id="country" required>
-        <option value="CZE">CZE</option>
-        <option value="FRA">FRA</option>
-        <option value="ESP">ESP</option>
-        <option value="DEU">DEU</option>
-        <option value="POL">POL</option>
-        <option value="SVK">SVK</option>
-        <option value="HUN">HUN</option>
-      </select>
-      <button id="runBulkBtn" type="submit">Run Bulk Audit</button>
-    </form>
+      <div class="toolbar">
+        <div id="srvPill" class="pill unknown"><span class="dot-s"></span><span id="srvText">Server: neznámý</span></div>
+        <button id="pingBtn" class="secondary">Ping server</button>
+      </div>
 
-    <div id="bulkStatus" class="status"></div>
-    <div id="bulkProgress" class="small mono"></div>
-    <div id="bulkLink" class="small"></div>
+      <form id="bulkForm" class="stack">
+        <div>
+          <label for="country">Země</label>
+          <select id="country" required>
+            <option value="CZE">CZE</option>
+            <option value="FRA">FRA</option>
+            <option value="ESP">ESP</option>
+            <option value="DEU">DEU</option>
+            <option value="POL">POL</option>
+            <option value="SVK">SVK</option>
+            <option value="HUN">HUN</option>
+          </select>
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <button id="runBtn" type="submit">Spustit audit</button>
+        </div>
+      </form>
 
-    <div id="rows"></div>
+      <div id="runStatus" class="status"></div>
+      <div id="runProgress" class="progress mono"></div>
+      <div id="runSub" class="progress mono"></div>
 
-    <ul id="jarvisLog"></ul>
+      <div id="results" class="grid"></div>
+    </div>
   </div>
 
-<script>
-  const API = 'https://migrationbob-api.onrender.com';
+  <script>
+    const API = 'https://migrationbob-api.onrender.com';
 
-  const bulkForm = document.getElementById('bulkForm');
-  const countrySel = document.getElementById('country');
-  const runBulkBtn = document.getElementById('runBulkBtn');
-  const bulkStatus = document.getElementById('bulkStatus');
-  const bulkProgress = document.getElementById('bulkProgress');
-  const bulkLink = document.getElementById('bulkLink');
-  const jarvisLog = document.getElementById('jarvisLog');
-  const rows = document.getElementById('rows');
+    const countrySel = document.getElementById('country');
+    const runBtn = document.getElementById('runBtn');
+    const pingBtn = document.getElementById('pingBtn');
+    const srvPill = document.getElementById('srvPill');
+    const srvText = document.getElementById('srvText');
+    const runStatus = document.getElementById('runStatus');
+    const runProgress = document.getElementById('runProgress');
+    const runSub = document.getElementById('runSub');
+    const results = document.getElementById('results');
 
-  function jarvis(a,b='') {
-    console.log('%cJarvis:','background:#111;color:#fff;padding:2px 6px;border-radius:3px',a,b);
-    const li=document.createElement('li'); li.textContent=`${a}${b?` ${b}:`:''}`; jarvisLog.appendChild(li);
-  }
+    const rows = new Map();
 
-  function setBusy(b,msg='') {
-    runBulkBtn.disabled = b;
-    bulkStatus.textContent = msg;
-  }
+    function jarvis(...a){console.log('Jarvis:', ...a)}
 
-  function slugFrom(url,country) {
-    const base = `https://cxprod-web.cemex.com/cs/web/cemex-${country.toLowerCase()}/`;
-    return url.startsWith(base) ? `/${url.slice(base.length)}` : new URL(url).pathname;
-  }
+    function setServerState(state){
+      srvPill.classList.remove('ok','bad','unknown');
+      if(state==='ok'){srvPill.classList.add('ok');srvText.textContent='Server: online'}
+      else if(state==='bad'){srvPill.classList.add('bad');srvText.textContent='Server: offline'}
+      else{srvPill.classList.add('unknown');srvText.textContent='Server: neznámý'}
+    }
 
-  function findOrCreateRow(id, slug, count) {
-    let el = document.getElementById(id);
-    if (!el) {
-      el = document.createElement('div');
-      el.className = 'row-card';
-      el.id = id;
-      const t = document.createElement('div');
-      t.className = 'slug mono';
-      t.textContent = slug;
+    async function ping(){
+      try{
+        const r = await fetch(`${API}/healthz`, {cache:'no-store'});
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        setServerState('ok');
+        return true;
+      }catch(e){
+        setServerState('bad');
+        return false;
+      }
+    }
+
+    async function ensureServerReady(maxMs=60000){
+      const t0 = Date.now();
+      let wait = 800;
+      runStatus.textContent = 'Probouzím server…';
+      while(Date.now()-t0 < maxMs){
+        if(await ping()){runStatus.textContent='Server připraven.';return true}
+        await new Promise(r=>setTimeout(r,wait));
+        wait = Math.min(wait*1.6, 4000);
+      }
+      runStatus.textContent = 'Server se nepodařilo připravit.';
+      return false;
+    }
+
+    function toSlug(url){
+      if(!url) return '';
+      try{
+        const u = new URL(url);
+        const path = u.pathname.replace(/\/+$/,'');
+        const cut = path.replace(/^\/cs\/web\/cemex(-[a-z]{2})?\//,'/cs/web/cemex$1/');
+        return cut || '/';
+      }catch{ return url }
+    }
+
+    function getOrCreateRow(slug, testsCount){
+      if(rows.has(slug)) return rows.get(slug);
+      const card = document.createElement('div');
+      card.className = 'card';
+      const row = document.createElement('div');
+      row.className = 'row';
+      const l = document.createElement('div');
+      l.className = 'slug';
+      l.textContent = slug;
       const dots = document.createElement('div');
       dots.className = 'dots';
-      for (let i=0;i<count;i++) {
-        const d = document.createElement('span');
-        d.className = 'dot';
-        dots.appendChild(d);
+      const n = Math.max(1, testsCount || 12);
+      for(let i=0;i<n;i++){
+        const s = document.createElement('span');
+        s.className='dot';
+        dots.appendChild(s);
       }
-      el.appendChild(t);
-      el.appendChild(dots);
-      rows.appendChild(el);
-    } else {
-      const dots = el.querySelector('.dots');
-      const have = dots.children.length;
-      if (have < count) {
-        for (let i=have;i<count;i++) {
-          const d = document.createElement('span');
-          d.className = 'dot';
-          dots.appendChild(d);
-        }
+      row.appendChild(l);
+      row.appendChild(dots);
+      card.appendChild(row);
+      results.appendChild(card);
+      const rec = {card,row,label:l,dots,slug};
+      rows.set(slug, rec);
+      return rec;
+    }
+
+    function ensureDots(rec, count){
+      const have = rec.dots.children.length;
+      if(have >= count) return;
+      for(let i=have;i<count;i++){
+        const s = document.createElement('span');
+        s.className = 'dot';
+        rec.dots.appendChild(s);
       }
     }
-    return el;
-  }
 
-  function setDot(row, idx, ok) {
-    const dots = row.querySelectorAll('.dot');
-    const i = idx - 1;
-    if (dots[i]) {
-      dots[i].classList.remove('ok','fail');
-      dots[i].classList.add(ok ? 'ok':'fail');
+    function setBusy(b){
+      runBtn.disabled = b;
+      pingBtn.disabled = b;
     }
-  }
 
-  async function startBulk(country) {
-    const r = await fetch(`${API}/bulk/run?country=${encodeURIComponent(country)}`, { method: 'POST' });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  }
-
-  bulkForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const country = countrySel.value;
-
-    rows.innerHTML = '';
-    bulkLink.textContent = '';
-    bulkProgress.textContent = '';
-    jarvisLog.innerHTML = '';
-    setBusy(true, `Starting bulk for ${country}…`);
-    jarvis('Bulk start', country);
-
-    try {
-      const { jobId } = await startBulk(country);
-      if (!jobId) throw new Error('Missing jobId');
-      jarvis('Job ID', jobId);
-
-      let total = 0;
-
-      const es = new EventSource(`${API}/bulk/stream/${jobId}`);
-
-      es.addEventListener('start', (ev) => {
-        const d = JSON.parse(ev.data||'{}');
-        total = d.total||0;
-        bulkProgress.textContent = `Progress: 0/${total} (0%)`;
-        jarvis('SSE start', JSON.stringify(d));
-      });
-
-      es.addEventListener('page', (ev) => {
-        const d = JSON.parse(ev.data||'{}');
-        const slug = slugFrom(d.url, country);
-        findOrCreateRow(slug.replace(/[^\w-]/g,'_'), slug, d.checkTotal||0);
-      });
-
-      es.addEventListener('check', (ev) => {
-        const d = JSON.parse(ev.data||'{}');
-        const slug = slugFrom(d.url, country);
-        const row = findOrCreateRow(slug.replace(/[^\w-]/g,'_'), slug, d.checkTotal||0);
-        setDot(row, d.checkIndex||1, !!d.ok);
-      });
-
-      es.addEventListener('result', (ev) => {
-        const d = JSON.parse(ev.data||'{}');
-        const slug = slugFrom(d.url, country);
-        const pct = total>0 ? Math.round((d.index/total)*100) : 0;
-        bulkStatus.textContent = `Auditing: ${d.index}/${total}`;
-        bulkProgress.textContent = `Progress: ${d.index}/${total} (${pct}%)`;
-        jarvis('Page result', `${d.index}/${total} ${slug} → ${d.allOk?'OK':'NOK'}`);
-      });
-
-      es.addEventListener('done', (ev) => {
-        const d = JSON.parse(ev.data||'{}');
-        setBusy(false, 'Done.');
-        if (d.outputUrl) bulkLink.innerHTML = `Result: <a href="${d.outputUrl}" target="_blank">${d.outputUrl}</a>`;
-        jarvis('Bulk done');
-        es.close();
-      });
-
-      es.addEventListener('error', () => {
-        setBusy(false, 'Bulk error');
-        jarvis('Bulk error');
-        es.close();
-      });
-    } catch (err) {
-      setBusy(false, 'Bulk start failed');
-      jarvis('Bulk start failed', err?.message||String(err));
+    async function startBulk(country){
+      const r = await fetch(`${API}/bulk/run?country=${encodeURIComponent(country)}`, {method:'POST'});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return r.json();
     }
-  });
-</script>
 
+    function updateProgress(i,total){
+      const pct = total ? Math.round((i/total)*100) : 0;
+      runStatus.textContent = `Kontroluji: ${i}/${total}`;
+      runProgress.textContent = `Progress: ${i}/${total} (${pct}%)`;
+      runSub.textContent = `${i}/${total}`;
+    }
+
+    pingBtn.addEventListener('click', async ()=>{
+      setBusy(true);
+      runStatus.textContent = 'Pinguji…';
+      const ok = await ping();
+      runStatus.textContent = ok ? 'Server je online.' : 'Server je offline.';
+      setBusy(false);
+    });
+
+    document.getElementById('bulkForm').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const country = countrySel.value;
+      results.innerHTML = '';
+      rows.clear();
+      runProgress.textContent='';
+      runSub.textContent='';
+      setBusy(true);
+
+      const ready = await ensureServerReady();
+      if(!ready){ setBusy(false); return }
+
+      runStatus.textContent = `Spouštím audit pro ${country}…`;
+      jarvis('Bulk start', country);
+
+      try{
+        const { jobId } = await startBulk(country);
+        if(!jobId) throw new Error('Missing jobId');
+        jarvis('Job ID', jobId);
+
+        const es = new EventSource(`${API}/bulk/stream/${jobId}`);
+
+        es.addEventListener('start', ev=>{
+          const d = JSON.parse(ev.data||'{}');
+          jarvis('SSE start', ev.data);
+          runProgress.textContent = `Progress: 0/${d.total||0} (0%)`;
+          runSub.textContent = '0/0';
+          runStatus.textContent = '';
+        });
+
+        es.addEventListener('page', ev=>{
+          const d = JSON.parse(ev.data||'{}');
+          const slug = toSlug(d.url||'');
+          const totalChecks = d.checkTotal || 12;
+          const rec = getOrCreateRow(slug, totalChecks);
+          ensureDots(rec, totalChecks);
+          updateProgress(d.index||0, d.total||0);
+        });
+
+        es.addEventListener('check', ev=>{
+          const d = JSON.parse(ev.data||'{}');
+          const slug = toSlug(d.url||'');
+          const rec = getOrCreateRow(slug, d.checkTotal||12);
+          ensureDots(rec, d.checkTotal||12);
+          const idx = Math.max(0, (d.checkIndex||1) - 1);
+          const el = rec.dots.children[idx] || rec.dots.lastElementChild;
+          el.classList.remove('ok','bad');
+          el.classList.add(d.ok ? 'ok' : 'bad');
+        });
+
+        es.addEventListener('result', ev=>{
+          const d = JSON.parse(ev.data||'{}');
+          updateProgress(d.index||0, d.total||0);
+          jarvis(`Page result ${d.index||'?'} / ${d.total||'?'} ${toSlug(d.url||'')} → ${d.allOk ? 'OK' : 'NOK'}`);
+        });
+
+        es.addEventListener('done', ev=>{
+          const d = JSON.parse(ev.data||'{}');
+          runStatus.textContent = 'Hotovo.';
+          jarvis('Bulk done', d.outputUrl||'');
+          es.close();
+          setBusy(false);
+        });
+
+        es.addEventListener('error', ()=>{
+          runStatus.textContent = 'Chyba při běhu auditu.';
+          jarvis('Bulk error');
+          es.close();
+          setBusy(false);
+        });
+
+        es.addEventListener('ping', ()=>{});
+
+      }catch(err){
+        jarvis('Bulk start failed', err?.message||String(err));
+        runStatus.textContent = 'Nelze spustit audit.';
+        setBusy(false);
+      }
+    });
+
+    (async()=>{ await ping() })();
+  </script>
 </body>
 </html>

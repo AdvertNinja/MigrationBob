@@ -188,6 +188,22 @@ app.MapGet("/bulk/stream/{id}", async (HttpContext ctx, string id) =>
     await ctx.Response.WriteAsync("retry: 2000\n\n");
     await ctx.Response.Body.FlushAsync();
 
+    using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+    var hbTask = Task.Run(async () =>
+    {
+        try
+        {
+            while (!linkedCts.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), linkedCts.Token);
+                if (linkedCts.IsCancellationRequested) break;
+                await ctx.Response.WriteAsync(": keep-alive\n\n");
+                await ctx.Response.Body.FlushAsync();
+            }
+        }
+        catch { }
+    });
+
     try
     {
         await foreach (var evt in job.Events.Reader.ReadAllAsync(ctx.RequestAborted))
@@ -197,6 +213,11 @@ app.MapGet("/bulk/stream/{id}", async (HttpContext ctx, string id) =>
         }
     }
     catch { }
+    finally
+    {
+        linkedCts.Cancel();
+        try { await hbTask; } catch { }
+    }
 });
 
 app.Run();
