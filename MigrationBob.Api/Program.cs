@@ -27,6 +27,13 @@ app.MapPost("/audit", async (AuditReq req) =>
     return Results.Json(res, new JsonSerializerOptions { WriteIndented = true });
 });
 
+app.MapGet("/audit", async (string url) =>
+{
+    if (string.IsNullOrWhiteSpace(url)) return Results.BadRequest(new { error = "Missing url" });
+    var res = await Auditor.AuditAsync(url);
+    return Results.Json(res, new JsonSerializerOptions { WriteIndented = true });
+});
+
 app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
 {
     if (string.IsNullOrWhiteSpace(country)) return Results.BadRequest(new { error = "missing_country" });
@@ -41,7 +48,7 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
             job.Status = "running";
             using var http = f.CreateClient();
 
-            var listUrl = $"https://cemex.advert.ninja/tools/MigrationBob/mvp-audit/{job.Country.ToLowerInvariant()}/seznam.txt";
+            var listUrl = $"https://cemex.advert.ninja/tools/MigrationBob/mvp-audit/{job.Country}/seznam.txt";
             var listText = await http.GetStringAsync(listUrl);
             var urls = Regex.Matches(listText, @"https?://[^\s]+", RegexOptions.IgnoreCase)
                             .Select(m => m.Value.Trim().TrimEnd(',', ';'))
@@ -62,25 +69,12 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
                     var r = await Auditor.AuditAsync(u);
                     results.Add(r);
 
-                    var slug = SlugFromUrl(r.Url.ToString());
-                    var checksArr = r.Checks.Select(c => c.Ok).ToArray();
-
-                    await job.Events.Writer.WriteAsync(Sse("page-start", new
-                    {
-                        index = i + 1,
-                        total = job.Total,
-                        url = r.Url.ToString(),
-                        checkTotal = r.Checks.Count,
-                        slug
-                    }));
-
                     await job.Events.Writer.WriteAsync(Sse("page", new
                     {
                         index = i + 1,
                         total = job.Total,
                         url = r.Url.ToString(),
-                        checkTotal = r.Checks.Count,
-                        slug
+                        checkTotal = r.Checks.Count
                     }));
 
                     for (int ci = 0; ci < r.Checks.Count; ci++)
@@ -103,32 +97,19 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
                         index = i + 1,
                         total = job.Total,
                         url = r.Url.ToString(),
-                        allOk = r.AllOk,
-                        checkTotal = r.Checks.Count,
-                        checks = checksArr,
-                        slug
+                        allOk = r.AllOk
                     }));
 
                     job.Done = i + 1;
                 }
                 catch (Exception ex)
                 {
-                    var slug = SlugFromUrl(u);
-                    await job.Events.Writer.WriteAsync(Sse("page-start", new
-                    {
-                        index = i + 1,
-                        total = job.Total,
-                        url = u,
-                        checkTotal = 1,
-                        slug
-                    }));
                     await job.Events.Writer.WriteAsync(Sse("page", new
                     {
                         index = i + 1,
                         total = job.Total,
                         url = u,
-                        checkTotal = 1,
-                        slug
+                        checkTotal = 1
                     }));
                     await job.Events.Writer.WriteAsync(Sse("check", new
                     {
@@ -145,10 +126,7 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
                         index = i + 1,
                         total = job.Total,
                         url = u,
-                        allOk = false,
-                        checkTotal = 1,
-                        checks = new[] { false },
-                        slug
+                        allOk = false
                     }));
 
                     var ar = new AuditResult { Url = new Uri(u) };
@@ -255,21 +233,6 @@ static string Sse(string name, object payload)
 {
     var json = JsonSerializer.Serialize(payload);
     return $"event: {name}\n" + $"data: {json}\n\n";
-}
-
-static string SlugFromUrl(string url)
-{
-    try
-    {
-        var u = new Uri(url);
-        var path = u.AbsolutePath.TrimEnd('/');
-        var norm = Regex.Replace(path, @"^/cs/web/cemex(-[a-z]{2})?/", "/cs/web/cemex$1/");
-        return string.IsNullOrEmpty(norm) ? "/" : norm;
-    }
-    catch
-    {
-        return url;
-    }
 }
 
 record AuditReq(string Url);

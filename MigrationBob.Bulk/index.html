@@ -95,7 +95,6 @@
     const results = document.getElementById('results');
 
     const rows = new Map();
-    let totalGlobal = 0;
 
     function jarvis(...a){console.log('Jarvis:', ...a)}
 
@@ -227,19 +226,19 @@
 
         es.addEventListener('start', ev=>{
           const d = JSON.parse(ev.data||'{}');
-          totalGlobal = d.total || 0;
           jarvis('SSE start', ev.data);
-          runProgress.textContent = `Progress: 0/${totalGlobal} (0%)`;
+          runProgress.textContent = `Progress: 0/${d.total||0} (0%)`;
           runSub.textContent = '0/0';
           runStatus.textContent = '';
         });
 
-        es.addEventListener('page-start', ev=>{
+        es.addEventListener('page', ev=>{
           const d = JSON.parse(ev.data||'{}');
-          const slug = d.slug || toSlug(d.url||'');
-          const rec = getOrCreateRow(slug, d.checkTotal || 12);
-          ensureDots(rec, d.checkTotal || 12);
-          updateProgress((d.index||1)-1, totalGlobal || d.total || 0);
+          const slug = toSlug(d.url||'');
+          const totalChecks = d.checkTotal || 12;
+          const rec = getOrCreateRow(slug, totalChecks);
+          ensureDots(rec, totalChecks);
+          updateProgress(d.index||0, d.total||0);
         });
 
         es.addEventListener('check', ev=>{
@@ -255,19 +254,8 @@
 
         es.addEventListener('result', ev=>{
           const d = JSON.parse(ev.data||'{}');
-          const slug = d.slug || toSlug(d.url||'');
-          const checks = Array.isArray(d.checks) ? d.checks : [];
-          const rec = getOrCreateRow(slug, checks.length || 12);
-          ensureDots(rec, checks.length || 12);
-          checks.forEach((ok,i)=>{
-            const el = rec.dots.children[i];
-            if(el){
-              el.classList.remove('ok','bad');
-              el.classList.add(ok ? 'ok' : 'bad');
-            }
-          });
-          updateProgress(d.index||0, totalGlobal || d.total || 0);
-          jarvis(`Page result ${d.index||'?'} / ${totalGlobal||d.total||'?'} ${slug} → ${d.allOk ? 'OK' : 'NOK'}`);
+          updateProgress(d.index||0, d.total||0);
+          jarvis(`Page result ${d.index||'?'} / ${d.total||'?'} ${toSlug(d.url||'')} → ${d.allOk ? 'OK' : 'NOK'}`);
         });
 
         es.addEventListener('done', ev=>{
@@ -284,7 +272,6 @@
         });
 
         es.addEventListener('ping', ()=>{});
-
       }catch(err){
         jarvis('Bulk start failed', err?.message||String(err));
         runStatus.textContent = 'Nelze spustit audit.';
