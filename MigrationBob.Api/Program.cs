@@ -51,11 +51,9 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
         try
         {
             job.Status = "running";
-
             var http = f.CreateClient();
-            var listUrl = $"https://cemex.advert.ninja/tools/MigrationBob/mvp-audit/{job.Country.ToLower()}/seznam.txt";
-            var listText = await http.GetStringAsync(listUrl);
 
+            var listText = await LoadListAsync(http, job.Country);
             var urls = listText.Split('\n', '\r', StringSplitOptions.RemoveEmptyEntries)
                                .Select(s => s.Trim())
                                .Where(s => s.StartsWith("http", StringComparison.OrdinalIgnoreCase))
@@ -63,35 +61,34 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
                                .ToList();
 
             job.Total = urls.Count;
-            await job.Events.Writer.WriteAsync(Sse("start", new { jobId = job.Id, total = job.Total, country = job.Country }));
+            await job.Events.Writer.WriteAsync(Sse("start", new { total = job.Total }));
 
             var results = new List<AuditResult>();
-
             for (int i = 0; i < urls.Count; i++)
             {
-                var u = urls[i];
-                await job.Events.Writer.WriteAsync(Sse("progress", new { index = i + 1, total = job.Total, url = u }));
-
+                var index = i + 1;
+                await job.Events.Writer.WriteAsync(Sse("progress", new { index, total = job.Total }));
                 AuditResult r;
                 try
                 {
-                    r = await Auditor.AuditAsync(u);
+                    r = await Auditor.AuditAsync(urls[i]);
                 }
                 catch (Exception ex)
                 {
-                    r = new AuditResult { Url = new Uri(u) };
+                    r = new AuditResult { Url = new Uri(urls[i]) };
                     r.Checks.Add(new CheckResult("Unhandled error", false, ex.Message));
                 }
 
-                lock (results) results.Add(r);
-                job.Done = i + 1;
+                results.Add(r);
+                job.Done = index;
 
+                var allOk = r.AllOk;
                 await job.Events.Writer.WriteAsync(Sse("result", new
                 {
-                    index = i + 1,
+                    index,
                     total = job.Total,
-                    url = u,
-                    allOk = r.AllOk
+                    url = r.Url.ToString(),
+                    allOk
                 }));
             }
 
@@ -115,7 +112,7 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
         {
             job.Error = ex.Message;
             job.Status = "error";
-            await job.Events.Writer.WriteAsync(Sse("error", new { message = ex.Message }));
+            await job.Events.Writer.WriteAsync(Sse("error", new { error = ex.Message }));
             job.Events.Writer.TryComplete(ex);
         }
     });
@@ -140,32 +137,65 @@ app.MapGet("/bulk/status/{id}", (string id) =>
     });
 });
 
-app.MapGet("/bulk/stream/{id}", async (string id, HttpResponse response) =>
+app.MapGet("/bulk/stream/{id}", async (HttpContext ctx, string id) =>
 {
     if (!jobs.TryGetValue(id, out var job))
     {
-        response.StatusCode = 404;
+        ctx.Response.StatusCode = 404;
         return;
     }
 
-    response.Headers.Append("Cache-Control", "no-cache");
-    response.Headers.Append("Content-Type", "text/event-stream");
-    response.Headers.Append("X-Accel-Buffering", "no");
+    var res = ctx.Response;
+    res.Headers.Append("Cache-Control", "no-cache");
+    res.Headers.Append("Content-Type", "text/event-stream");
+    res.Headers.Append("X-Accel-Buffering", "no");
 
-    await foreach (var msg in job.Events.Reader.ReadAllAsync())
+    await res.WriteAsync(": ping\n\n");
+    await res.Body.FlushAsync();
+
+    var heartbeat = Task.Run(async () =>
     {
-        await response.WriteAsync(msg);
-        await response.Body.FlushAsync();
+        while (!ctx.RequestAborted.IsCancellationRequested)
+        {
+            await Task.Delay(10000, ctx.RequestAborted);
+            if (!ctx.RequestAborted.IsCancellationRequested)
+            {
+                await res.WriteAsync(": hb\n\n");
+                await res.Body.FlushAsync();
+            }
+        }
+    });
+
+    try
+    {
+        await foreach (var frame in job.Events.Reader.ReadAllAsync(ctx.RequestAborted))
+        {
+            await res.WriteAsync(frame);
+            await res.Body.FlushAsync();
+        }
     }
+    catch { }
 });
 
 app.Run();
 
-static string Sse(string type, object payload)
-    => $"event: {type}\n" + $"data: {JsonSerializer.Serialize(payload)}\n\n";
+static async Task<string> LoadListAsync(HttpClient http, string country)
+{
+    var upper = $"https://cemex.advert.ninja/tools/MigrationBob/mvp-audit/{country}/seznam.txt";
+    var r1 = await http.GetAsync(upper);
+    if (r1.IsSuccessStatusCode) return await r1.Content.ReadAsStringAsync();
+
+    var lower = $"https://cemex.advert.ninja/tools/MigrationBob/mvp-audit/{country.ToLowerInvariant()}/seznam.txt";
+    var r2 = await http.GetAsync(lower);
+    if (r2.IsSuccessStatusCode) return await r2.Content.ReadAsStringAsync();
+
+    throw new Exception("List file not found");
+}
+
+static string Sse(string evt, object data)
+    => $"event: {evt}\ndata: {JsonSerializer.Serialize(data)}\n\n";
 
 record AuditReq(string Url);
-
 class BulkJob
 {
     public string Id { get; } = Guid.NewGuid().ToString("n");
@@ -178,5 +208,4 @@ class BulkJob
     public Channel<string> Events { get; } = Channel.CreateUnbounded<string>();
     public BulkJob(string country) { Country = country; }
 }
-
 record SaveResp(string? status = null, string? url = null);

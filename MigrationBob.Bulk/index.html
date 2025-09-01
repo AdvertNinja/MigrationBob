@@ -21,8 +21,6 @@
         <option value="ESP">ESP</option>
         <option value="DEU">DEU</option>
         <option value="POL">POL</option>
-        <option value="SVK">SVK</option>
-        <option value="HUN">HUN</option>
       </select>
       <button id="runBulkBtn" type="submit">Run Bulk Audit</button>
     </form>
@@ -45,76 +43,96 @@
   const bulkLink = document.getElementById('bulkLink');
   const jarvisLog = document.getElementById('jarvisLog');
 
-  function logJarvis(msg) {
-    const li = document.createElement('li');
-    li.textContent = msg;
-    jarvisLog.appendChild(li);
-  }
+  function logJarvis(msg){ const li=document.createElement('li'); li.textContent=msg; jarvisLog.appendChild(li); }
+  function setBusy(b,msg=''){ runBulkBtn.disabled=b; bulkStatus.textContent=msg; }
 
-  function setBusy(b, msg='') {
-    runBulkBtn.disabled = b;
-    bulkStatus.textContent = msg;
+  async function startBulk(country){
+    const r=await fetch(`${API}/bulk/run?country=${encodeURIComponent(country)}`,{method:'POST'});
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
   }
-
-  async function startBulk(country) {
-    const r = await fetch(`${API}/bulk/run?country=${encodeURIComponent(country)}`, { method: 'POST' });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  async function getStatus(jobId){
+    const r=await fetch(`${API}/bulk/status/${encodeURIComponent(jobId)}`);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.json();
   }
 
-  bulkForm.addEventListener('submit', async (e) => {
+  function startPolling(jobId){
+    let lastDone=0, total=0;
+    const t=setInterval(async ()=>{
+      try{
+        const s=await getStatus(jobId);
+        total=s.total||0;
+        const done=s.done||0;
+        if(total){ const pct=Math.round((done/total)*100); bulkProgress.textContent=`Progress: ${done}/${total} (${pct}%)`; }
+        if(done!==lastDone){ bulkStatus.textContent=`Kontroluji: ${done}/${total||'?'}`; lastDone=done; }
+        if(s.status==='done'){ clearInterval(t); setBusy(false,'Hotovo.'); if(s.outputUrl) bulkLink.innerHTML=`Výsledek: <a href="${s.outputUrl}" target="_blank">${s.outputUrl}</a>`; logJarvis('Bulk done'); }
+        if(s.status==='error'){ clearInterval(t); setBusy(false,'Chyba při běhu auditu.'); logJarvis(`Bulk error ${s.error||''}`); }
+      }catch(e){ /* ignore transient */ }
+    }, 2000);
+  }
+
+  bulkForm.addEventListener('submit', async (e)=>{
     e.preventDefault();
-    const country = countrySel.value;
+    const country=countrySel.value;
+    bulkLink.textContent=''; bulkProgress.textContent=''; jarvisLog.innerHTML='';
+    setBusy(true,`Spouštím bulk audit pro ${country}…`); logJarvis(`Bulk start ${country}`);
 
-    bulkLink.textContent = '';
-    bulkProgress.textContent = '';
-    jarvisLog.innerHTML = '';
-    setBusy(true, `Spouštím bulk audit pro ${country}…`);
-    logJarvis(`Bulk start ${country}`);
+    try{
+      const {jobId}=await startBulk(country);
+      if(!jobId) throw new Error('Missing jobId');
 
-    try {
-      const { jobId } = await startBulk(country);
-      if (!jobId) throw new Error('Missing jobId');
+      let gotAny=false, closed=false;
+      const es=new EventSource(`${API}/bulk/stream/${jobId}`);
 
-      const es = new EventSource(`${API}/bulk/stream/${jobId}`);
-
-      es.addEventListener('start', (ev) => {
-        const d = JSON.parse(ev.data);
-        bulkProgress.textContent = `Progress: 0/${d.total} (0%)`;
+      es.addEventListener('start',ev=>{
+        gotAny=true;
+        const d=JSON.parse(ev.data);
+        bulkProgress.textContent=`Progress: 0/${d.total} (0%)`;
       });
 
-      es.addEventListener('progress', (ev) => {
-        const d = JSON.parse(ev.data);
-        bulkStatus.textContent = `Kontroluji: ${d.index}/${d.total}`;
+      es.addEventListener('progress',ev=>{
+        gotAny=true;
+        const d=JSON.parse(ev.data);
+        bulkStatus.textContent=`Kontroluji: ${d.index}/${d.total}`;
       });
 
-      es.addEventListener('result', (ev) => {
-        const d = JSON.parse(ev.data);
-        const pct = Math.round((d.index / d.total) * 100);
-        bulkProgress.textContent = `Progress: ${d.index}/${d.total} (${pct}%)`;
-        logJarvis(`${d.index}/${d.total} ${d.url} → ${d.allOk ? 'OK' : 'NOK'}`);
+      es.addEventListener('result',ev=>{
+        gotAny=true;
+        const d=JSON.parse(ev.data);
+        const pct=Math.round((d.index/d.total)*100);
+        bulkProgress.textContent=`Progress: ${d.index}/${d.total} (${pct}%)`;
+        logJarvis(`${d.index}/${d.total} ${d.url} → ${d.allOk?'OK':'NOK'}`);
       });
 
-      es.addEventListener('done', (ev) => {
-        const d = JSON.parse(ev.data);
-        setBusy(false, 'Hotovo.');
-        bulkLink.innerHTML = d.outputUrl ? `Výsledek: <a href="${d.outputUrl}" target="_blank">${d.outputUrl}</a>` : '';
-        logJarvis('Bulk done');
-        es.close();
+      es.addEventListener('done',ev=>{
+        gotAny=true; closed=true;
+        const d=JSON.parse(ev.data);
+        setBusy(false,'Hotovo.');
+        if(d.outputUrl) bulkLink.innerHTML=`Výsledek: <a href="${d.outputUrl}" target="_blank">${d.outputUrl}</a>`;
+        logJarvis('Bulk done'); es.close();
       });
 
-      es.addEventListener('error', () => {
-        setBusy(false, 'Chyba při běhu auditu.');
-        logJarvis('Bulk error');
-        es.close();
-      });
-    } catch (err) {
+      es.onerror=()=>{
+        if(!closed){
+          es.close();
+          if(!gotAny){
+            logJarvis('SSE nedostupné, přepínám na polling.');
+            startPolling(jobId);
+          }else{
+            logJarvis('SSE přerušeno, pokračuji pollingem.');
+            startPolling(jobId);
+          }
+        }
+      };
+    }catch(err){
       console.error(err);
-      setBusy(false, 'Bulk start failed');
-      logJarvis('Bulk start failed');
+      setBusy(false,'Chyba při běhu auditu.');
+      logJarvis('Bulk error');
     }
   });
 </script>
+
 
 </body>
 </html>
