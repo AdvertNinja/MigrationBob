@@ -1,10 +1,14 @@
+version: "3.9"
+
 services:
   api:
-    image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
+    build:
+      context: .
+      dockerfile: dockerfile  # v repu máš soubor "dockerfile"
+    image: migrationbob-api:local
     environment:
       - ASPNETCORE_URLS=http://0.0.0.0:8080
       - FRONTEND_ORIGINS=https://cemex.advert.ninja,http://localhost:5173
-    restart: always
     expose:
       - "8080"
 
@@ -12,9 +16,7 @@ services:
     image: nginx:1.25-alpine
     depends_on:
       - api
-    restart: always
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
