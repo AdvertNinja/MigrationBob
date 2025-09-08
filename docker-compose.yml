@@ -4,19 +4,26 @@ services:
   api:
     build:
       context: .
-      dockerfile: dockerfile  # v repu máš soubor "dockerfile"
-    image: migrationbob-api:local
+      dockerfile: dockerfile
+    container_name: migrationbob-api
     environment:
-      - ASPNETCORE_URLS=http://0.0.0.0:8080
-      - FRONTEND_ORIGINS=https://cemex.advert.ninja,http://localhost:5173
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      ASPNETCORE_ENVIRONMENT: Production
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS}
     expose:
       - "8080"
+    restart: always
 
   nginx:
     image: nginx:1.25-alpine
+    container_name: migrationbob-nginx
     depends_on:
       - api
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/letsencrypt
+      - ./webroot:/var/www/certbot
+    restart: always
