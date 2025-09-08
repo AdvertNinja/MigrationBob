@@ -59,12 +59,7 @@
           <label for="country">Země</label>
           <select id="country" required>
             <option value="CZE">CZE</option>
-            <option value="FRA">FRA</option>
-            <option value="ESP">ESP</option>
-            <option value="DEU">DEU</option>
-            <option value="POL">POL</option>
-            <option value="SVK">SVK</option>
-            <option value="HUN">HUN</option>
+            <option value="GER">GER</option>
           </select>
         </div>
         <div>
@@ -82,7 +77,8 @@
   </div>
 
   <script>
-    const API = 'https://migrationbob-api.onrender.com';
+const API = 'https://migrationbob.cemex.advert.ninja';
+
 
     const countrySel = document.getElementById('country');
     const runBtn = document.getElementById('runBtn');
@@ -107,8 +103,13 @@
 
     async function ping(){
       try{
-        const r = await fetch(`${API}/healthz`, {cache:'no-store'});
-        if(!r.ok) throw new Error('HTTP '+r.status);
+       // const r = await fetch(`${API}/healthz`, {cache:'no-store'});
+       // if(!r.ok) throw new Error('HTTP '+r.status);
+const r = await fetch(`${API}/healthz`, { cache: 'no-store', mode: 'cors' });
+if (!r.ok) throw new Error('HTTP ' + r.status);
+
+
+
         setServerState('ok');
         return true;
       }catch(e){
