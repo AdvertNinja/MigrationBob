@@ -1,6 +1,7 @@
-﻿using System.Collections.Concurrent;
+﻿﻿using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Net.Http.Json;
+using System.Net.Http;                    
 using MigrationBob.Core;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -62,6 +63,7 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
 
             await Task.WhenAll(tasks);
 
+  
             var ts = DateTime.Now.ToString("dd-MM-yyyy-HH-mm");
             var fileName = $"BobAudit-{job.Country}-{ts}.json";
             var content = JsonSerializer.Serialize(results, new JsonSerializerOptions { WriteIndented = true });
@@ -73,6 +75,28 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
             var saved = await resp.Content.ReadFromJsonAsync<SaveResp>() ?? new SaveResp();
 
             job.OutputUrl = saved.url ?? $"https://cemex.advert.ninja/tools/MigrationBob/mvp-audit/{job.Country}/audity/{fileName}";
+
+
+            int okPages  = results.Count(r => r.AllOk);
+            int nokPages = results.Count - okPages;
+
+            try
+            {
+                var emailEndpoint = "https://cemex.advert.ninja/tools/MigrationBob/MigrationBob.Bulk/odeslani-celeho-auditu.php";
+                var form = new FormUrlEncodedContent(new[]
+                {
+                    new KeyValuePair<string,string>("country", job.Country),
+                    new KeyValuePair<string,string>("url",     job.OutputUrl ?? string.Empty),
+                    new KeyValuePair<string,string>("total",   results.Count.ToString()),
+                    new KeyValuePair<string,string>("ok",      okPages.ToString()),
+                    new KeyValuePair<string,string>("nok",     nokPages.ToString())
+                });
+
+                using var emailResp = await http.PostAsync(emailEndpoint, form);
+                emailResp.EnsureSuccessStatusCode();
+            }
+            catch { /* e-mail neblokuje dokončení jobu */ }
+
             job.Status = "done";
         }
         catch (Exception ex)

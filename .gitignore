@@ -22,3 +22,5 @@ Thumbs.db
 Properties/PublishProfiles/
 _ReSharper*/
 *.DotSettings.user
+
+deploy.sh
