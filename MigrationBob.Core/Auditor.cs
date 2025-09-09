@@ -25,7 +25,7 @@ public static class Auditor
     public static async Task<AuditResult> AuditAsync(string url, int timeoutSec = 30, bool headless = true)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            throw new ArgumentException("Invalid URL.", nameof(url));
+            throw new ArgumentException("Vadná URL.", nameof(url));
 
         var result = new AuditResult { Url = uri };
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(timeoutSec) };
@@ -41,21 +41,21 @@ public static class Auditor
             Timeout = timeoutSec * 1000
         });
 
-        result.Checks.Add(new("Page returns 200 OK", nav?.Status == 200, $"Status: {(nav?.Status.ToString() ?? "null")}"));
+        result.Checks.Add(new("stránka dáva 200 OK", nav?.Status == 200, $"Status: {(nav?.Status.ToString() ?? "null")}"));
 
         var title = await page.TitleAsync();
         var hasTitle = !string.IsNullOrWhiteSpace(title);
-        result.Checks.Add(new("Title exists", hasTitle, hasTitle ? $"Title: \"{title}\"" : "Missing"));
+        result.Checks.Add(new("Title máme?", hasTitle, hasTitle ? $"Title: \"{title}\"" : "Title chybí"));
       //  result.Checks.Add(new("Title length 10–70", hasTitle && title.Length is >= 10 and <= 70, $"Length: {title?.Length ?? 0}"));
 
         var metaDesc = await FirstContentSafeAsync(page, "meta[name='description']");
         var hasDesc = !string.IsNullOrWhiteSpace(metaDesc);
-        result.Checks.Add(new("Meta description exists", hasDesc, hasDesc ? $"Description: \"{CollapseWs(metaDesc!)}\"" : "Missing"));
+        result.Checks.Add(new("Meta description existuje?", hasDesc, hasDesc ? $"Description: \"{CollapseWs(metaDesc!)}\"" : "Chybí"));
      //   result.Checks.Add(new("Description length 50–160", hasDesc && metaDesc!.Length is >= 50 and <= 160, $"Length: {metaDesc?.Length ?? 0}"));
 
         var metaKeywords = await FirstContentSafeAsync(page, "meta[name='keywords']");
         var hasKeywords = !string.IsNullOrWhiteSpace(metaKeywords);
-        result.Checks.Add(new("Meta keywords exist", hasKeywords, hasKeywords ? "Keywords present" : "Missing"));
+        result.Checks.Add(new("Meta keywords existují?", hasKeywords, hasKeywords ? "Keywords" : "Chybí"));
 
         var h1 = await TextContentSafeAsync(page, "h1");
         var hasH1 = !string.IsNullOrWhiteSpace(h1);
@@ -107,7 +107,7 @@ result.Checks.Add(
             .Take(10)
             .ToList();
         var noPlaceholders = placeholders.Count == 0;
-        result.Checks.Add(new("No placeholder images on page", noPlaceholders, noPlaceholders ? "OK" : $"Found {placeholders.Count} e.g. {string.Join(", ", placeholders)}"));
+        result.Checks.Add(new("Jsou všechny placeholdery vyměněny?", noPlaceholders, noPlaceholders ? "OK" : $"Našli jsme {placeholders.Count} e.g. {string.Join(", ", placeholders)}"));
 
         var (brokenCount, brokenSamples) = await CheckInternalLinksFastAsync(
             http, page, uri,
@@ -115,7 +115,7 @@ result.Checks.Add(
             maxToCheck: 30,
             maxParallel: 6,
             totalCapMs: 15000);
-        result.Checks.Add(new("No broken internal links", brokenCount == 0, brokenCount == 0 ? "OK" : $"Broken: {brokenCount} e.g. {string.Join(", ", brokenSamples)}"));
+        result.Checks.Add(new("Vadný odkazy", brokenCount == 0, brokenCount == 0 ? "OK" : $"Vadných: {brokenCount} e.g. {string.Join(", ", brokenSamples)}"));
 
         return result;
     }
