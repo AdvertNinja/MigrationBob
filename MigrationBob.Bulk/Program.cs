@@ -4,11 +4,9 @@ using System.Net.Http.Json;
 using MigrationBob.Core;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddHttpClient();
 
 var app = builder.Build();
-app.UseCors();
 
 var jobs = new ConcurrentDictionary<string, BulkJob>();
 
