@@ -79,14 +79,24 @@ public static class Auditor
             result.Checks.Add(new("og:image returns 200", false, "No og:image to check"));
         }
 
-        var badBtns = await page.EvaluateAsync<int>(
-            @"() => Array.from(document.querySelectorAll('[class*=""btn""]'))
-                  .filter(el => {
-                      const h = (el.getAttribute('href')||'').trim();
-                      return h==='' || h==='#';
-                  }).length;"
-        );
-        result.Checks.Add(new("All elements with class containing 'btn' have non-empty href", badBtns == 0, badBtns == 0 ? "OK" : $"Invalid: {badBtns}"));
+
+var badBtnLinks = await page.EvaluateAsync<int>(
+    @"() => Array.from(document.querySelectorAll('a[class*=""btn""]'))
+          .filter(a => {
+              const h = (a.getAttribute('href') || '').trim().toLowerCase();
+              if (!h) return true;                 // prázdné
+              if (h === '#') return true;          // jen kotva
+              if (h.startsWith('javascript:')) return true; // pseudo-odkaz
+              return false;
+          }).length;"
+);
+
+result.Checks.Add(
+    new("Anchors with class '*btn*' have meaningful href",
+        badBtnLinks == 0,
+        badBtnLinks == 0 ? "OK" : $"Invalid: {badBtnLinks}")
+);
+
 
         var imageUrls = await CollectAllImageUrlsAsync(page);
         var placeholders = imageUrls
