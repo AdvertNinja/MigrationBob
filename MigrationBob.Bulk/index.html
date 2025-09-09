@@ -79,208 +79,204 @@
   <script>
 const API = 'https://migrationbob.cemex.advert.ninja';
 
+const countrySel = document.getElementById('country');
+const runBtn = document.getElementById('runBtn');
+const pingBtn = document.getElementById('pingBtn');
+const srvPill = document.getElementById('srvPill');
+const srvText = document.getElementById('srvText');
+const runStatus = document.getElementById('runStatus');
+const runProgress = document.getElementById('runProgress');
+const runSub = document.getElementById('runSub');
+const results = document.getElementById('results');
 
-    const countrySel = document.getElementById('country');
-    const runBtn = document.getElementById('runBtn');
-    const pingBtn = document.getElementById('pingBtn');
-    const srvPill = document.getElementById('srvPill');
-    const srvText = document.getElementById('srvText');
-    const runStatus = document.getElementById('runStatus');
-    const runProgress = document.getElementById('runProgress');
-    const runSub = document.getElementById('runSub');
-    const results = document.getElementById('results');
+const rows = new Map();
 
-    const rows = new Map();
+function jarvis(...a){console.log('Jarvis:', ...a)}
 
-    function jarvis(...a){console.log('Jarvis:', ...a)}
+function setServerState(state){
+  srvPill.classList.remove('ok','bad','unknown');
+  if(state==='ok'){srvPill.classList.add('ok');srvText.textContent='Server: online'}
+  else if(state==='bad'){srvPill.classList.add('bad');srvText.textContent='Server: offline'}
+  else{srvPill.classList.add('unknown');srvText.textContent='Server: neznámý'}
+}
 
-    function setServerState(state){
-      srvPill.classList.remove('ok','bad','unknown');
-      if(state==='ok'){srvPill.classList.add('ok');srvText.textContent='Server: online'}
-      else if(state==='bad'){srvPill.classList.add('bad');srvText.textContent='Server: offline'}
-      else{srvPill.classList.add('unknown');srvText.textContent='Server: neznámý'}
-    }
+async function ping(){
+  try{
+    const r = await fetch(`${API}/healthz`, { cache: 'no-store', mode: 'cors' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    setServerState('ok'); return true;
+  }catch(e){ setServerState('bad'); return false; }
+}
 
-    async function ping(){
-      try{
-       // const r = await fetch(`${API}/healthz`, {cache:'no-store'});
-       // if(!r.ok) throw new Error('HTTP '+r.status);
-const r = await fetch(`${API}/healthz`, { cache: 'no-store', mode: 'cors' });
-if (!r.ok) throw new Error('HTTP ' + r.status);
+async function ensureServerReady(maxMs=60000){
+  const t0 = Date.now(); let wait = 800;
+  runStatus.textContent = 'Probouzím server…';
+  while(Date.now()-t0 < maxMs){
+    if(await ping()){runStatus.textContent='Server připraven.';return true}
+    await new Promise(r=>setTimeout(r,wait)); wait = Math.min(wait*1.6, 4000);
+  }
+  runStatus.textContent = 'Server se nepodařilo připravit.'; return false;
+}
 
+function toSlug(url){
+  if(!url) return '';
+  try{
+    const u = new URL(url);
+    let path = u.pathname.replace(/\/+$/,'').replace(/\/{2,}/g,'/');
+    let m = path.match(/^\/(?:[a-z]{2}\/)?web\/cemex-[a-z]{2}\/(.+)?$/i);
+    if (m) return '/' + decodeURIComponent(m[1] || '');
+    m = path.match(/\/cemex-[a-z]{2}\/(.+)?$/i);
+    if (m) return '/' + decodeURIComponent(m[1] || '');
+    return path || '/';
+  }catch{ return url; }
+}
 
+function getOrCreateRow(slug, testsCount){
+  if(rows.has(slug)) return rows.get(slug);
+  const card = document.createElement('div'); card.className = 'card';
+  const row = document.createElement('div'); row.className = 'row';
+  const l = document.createElement('div'); l.className = 'slug'; l.textContent = slug;
+  const dots = document.createElement('div'); dots.className = 'dots';
+  const n = Math.max(1, testsCount || 12);
+  for(let i=0;i<n;i++){ const s = document.createElement('span'); s.className='dot'; dots.appendChild(s); }
+  row.appendChild(l); row.appendChild(dots); card.appendChild(row); results.appendChild(card);
+  const rec = {card,row,label:l,dots,slug}; rows.set(slug, rec); return rec;
+}
 
-        setServerState('ok');
-        return true;
-      }catch(e){
-        setServerState('bad');
-        return false;
+function ensureDots(rec, count){
+  const have = rec.dots.children.length;
+  if(have >= count) return;
+  for(let i=have;i<count;i++){ const s = document.createElement('span'); s.className = 'dot'; rec.dots.appendChild(s); }
+}
+
+function setBusy(b){ runBtn.disabled = b; pingBtn.disabled = b; }
+
+async function startBulk(country){
+  const r = await fetch(`${API}/bulk/run?country=${encodeURIComponent(country)}`, {method:'POST'});
+  if(!r.ok) throw new Error('HTTP '+r.status); return r.json();
+}
+
+function updateProgress(i,total){
+  const pct = total ? Math.round((i/total)*100) : 0;
+  runStatus.textContent = `Kontroluji: ${i}/${total}`;
+  runProgress.textContent = `Progress: ${i}/${total} (${pct}%)`;
+  runSub.textContent = `${i}/${total}`;
+}
+
+function sendSummaryEmail(country, reportUrl, pages){
+  const total = pages.length;
+  const ok = pages.filter(p => p.allOk).length;
+  const nok = total - ok;
+
+  const payload = { country, reportUrl, total, ok, nok, pages };
+  jarvis('Email: odesílám souhrn', payload);
+
+  return fetch('https://cemex.advert.ninja/tools/MigrationBob/MigrationBob.Bulk/odeslani-celeho-auditu.php', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  })
+  .then(async r => ({ ok: r.ok, body: await r.json().catch(()=>({})) }))
+  .then(res => {
+    if(res.ok){ jarvis('Email odeslán', res.body); }
+    else { jarvis('Email selhal', res.body||{}); }
+  })
+  .catch(err => { jarvis('Email fetch error', err?.message||String(err)); });
+}
+
+document.getElementById('bulkForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const country = countrySel.value;
+  results.innerHTML = ''; rows.clear();
+  runProgress.textContent=''; runSub.textContent='';
+  setBusy(true);
+
+  const ready = await ensureServerReady(); if(!ready){ setBusy(false); return; }
+
+  runStatus.textContent = `Spouštím audit pro ${country}…`;
+  jarvis('Bulk start', country);
+
+  try{
+    const { jobId } = await startBulk(country);
+    if(!jobId) throw new Error('Missing jobId');
+    jarvis('Job ID', jobId);
+
+    const es = new EventSource(`${API}/bulk/stream/${jobId}`);
+
+    const pages = [];
+    let current = null;
+
+    es.addEventListener('start', ev=>{
+      const d = JSON.parse(ev.data||'{}');
+      jarvis('SSE start', ev.data);
+      runProgress.textContent = `Progress: 0/${d.total||0} (0%)`;
+      runSub.textContent = '0/0';
+      runStatus.textContent = '';
+    });
+
+    es.addEventListener('page', ev=>{
+      const d = JSON.parse(ev.data||'{}');
+      const slug = toSlug(d.url||'');
+      const totalChecks = d.checkTotal || 12;
+      const rec = getOrCreateRow(slug, totalChecks);
+      ensureDots(rec, totalChecks);
+      updateProgress(d.index||0, d.total||0);
+
+      current = { url: d.url || '', slug, checks: [], allOk: null };
+    });
+
+    es.addEventListener('check', ev=>{
+      const d = JSON.parse(ev.data||'{}');
+      const slug = toSlug(d.url||'');
+      const rec = getOrCreateRow(slug, d.checkTotal||12);
+      ensureDots(rec, d.checkTotal||12);
+      const idx = Math.max(0, (d.checkIndex||1) - 1);
+      const el = rec.dots.children[idx] || rec.dots.lastElementChild;
+      el.classList.remove('ok','bad');
+      el.classList.add(d.ok ? 'ok' : 'bad');
+
+      if(current && current.url === (d.url||current.url)){
+        current.checks.push({ ok: !!d.ok, name: d.name || '', details: d.details || '' });
       }
-    }
+    });
 
-    async function ensureServerReady(maxMs=60000){
-      const t0 = Date.now();
-      let wait = 800;
-      runStatus.textContent = 'Probouzím server…';
-      while(Date.now()-t0 < maxMs){
-        if(await ping()){runStatus.textContent='Server připraven.';return true}
-        await new Promise(r=>setTimeout(r,wait));
-        wait = Math.min(wait*1.6, 4000);
+    es.addEventListener('result', ev=>{
+      const d = JSON.parse(ev.data||'{}');
+      updateProgress(d.index||0, d.total||0);
+      jarvis(`Page result ${d.index||'?'} / ${d.total||'?'} ${toSlug(d.url||'')} → ${d.allOk ? 'OK' : 'NOK'}`);
+
+      if(current && current.url === (d.url||current.url)){
+        current.allOk = !!d.allOk;
+        pages.push(current);
+        current = null;
       }
-      runStatus.textContent = 'Server se nepodařilo připravit.';
-      return false;
-    }
+    });
 
-    function toSlug(url){
-      if(!url) return '';
-      try{
-        const u = new URL(url);
-        const path = u.pathname.replace(/\/+$/,'');
-        const cut = path.replace(/^\/cs\/web\/cemex(-[a-z]{2})?\//,'/cs/web/cemex$1/');
-        return cut || '/';
-      }catch{ return url }
-    }
+    es.addEventListener('done', async ev=>{
+      const d = JSON.parse(ev.data||'{}');
+      runStatus.textContent = 'Hotovo.';
+      jarvis('Bulk done', d.outputUrl||'');
 
-    function getOrCreateRow(slug, testsCount){
-      if(rows.has(slug)) return rows.get(slug);
-      const card = document.createElement('div');
-      card.className = 'card';
-      const row = document.createElement('div');
-      row.className = 'row';
-      const l = document.createElement('div');
-      l.className = 'slug';
-      l.textContent = slug;
-      const dots = document.createElement('div');
-      dots.className = 'dots';
-      const n = Math.max(1, testsCount || 12);
-      for(let i=0;i<n;i++){
-        const s = document.createElement('span');
-        s.className='dot';
-        dots.appendChild(s);
-      }
-      row.appendChild(l);
-      row.appendChild(dots);
-      card.appendChild(row);
-      results.appendChild(card);
-      const rec = {card,row,label:l,dots,slug};
-      rows.set(slug, rec);
-      return rec;
-    }
+      await sendSummaryEmail(country, d.outputUrl||'', pages);
 
-    function ensureDots(rec, count){
-      const have = rec.dots.children.length;
-      if(have >= count) return;
-      for(let i=have;i<count;i++){
-        const s = document.createElement('span');
-        s.className = 'dot';
-        rec.dots.appendChild(s);
-      }
-    }
-
-    function setBusy(b){
-      runBtn.disabled = b;
-      pingBtn.disabled = b;
-    }
-
-    async function startBulk(country){
-      const r = await fetch(`${API}/bulk/run?country=${encodeURIComponent(country)}`, {method:'POST'});
-      if(!r.ok) throw new Error('HTTP '+r.status);
-      return r.json();
-    }
-
-    function updateProgress(i,total){
-      const pct = total ? Math.round((i/total)*100) : 0;
-      runStatus.textContent = `Kontroluji: ${i}/${total}`;
-      runProgress.textContent = `Progress: ${i}/${total} (${pct}%)`;
-      runSub.textContent = `${i}/${total}`;
-    }
-
-    pingBtn.addEventListener('click', async ()=>{
-      setBusy(true);
-      runStatus.textContent = 'Pinguji…';
-      const ok = await ping();
-      runStatus.textContent = ok ? 'Server je online.' : 'Server je offline.';
+      es.close();
       setBusy(false);
     });
 
-    document.getElementById('bulkForm').addEventListener('submit', async (e)=>{
-      e.preventDefault();
-      const country = countrySel.value;
-      results.innerHTML = '';
-      rows.clear();
-      runProgress.textContent='';
-      runSub.textContent='';
-      setBusy(true);
-
-      const ready = await ensureServerReady();
-      if(!ready){ setBusy(false); return }
-
-      runStatus.textContent = `Spouštím audit pro ${country}…`;
-      jarvis('Bulk start', country);
-
-      try{
-        const { jobId } = await startBulk(country);
-        if(!jobId) throw new Error('Missing jobId');
-        jarvis('Job ID', jobId);
-
-        const es = new EventSource(`${API}/bulk/stream/${jobId}`);
-
-        es.addEventListener('start', ev=>{
-          const d = JSON.parse(ev.data||'{}');
-          jarvis('SSE start', ev.data);
-          runProgress.textContent = `Progress: 0/${d.total||0} (0%)`;
-          runSub.textContent = '0/0';
-          runStatus.textContent = '';
-        });
-
-        es.addEventListener('page', ev=>{
-          const d = JSON.parse(ev.data||'{}');
-          const slug = toSlug(d.url||'');
-          const totalChecks = d.checkTotal || 12;
-          const rec = getOrCreateRow(slug, totalChecks);
-          ensureDots(rec, totalChecks);
-          updateProgress(d.index||0, d.total||0);
-        });
-
-        es.addEventListener('check', ev=>{
-          const d = JSON.parse(ev.data||'{}');
-          const slug = toSlug(d.url||'');
-          const rec = getOrCreateRow(slug, d.checkTotal||12);
-          ensureDots(rec, d.checkTotal||12);
-          const idx = Math.max(0, (d.checkIndex||1) - 1);
-          const el = rec.dots.children[idx] || rec.dots.lastElementChild;
-          el.classList.remove('ok','bad');
-          el.classList.add(d.ok ? 'ok' : 'bad');
-        });
-
-        es.addEventListener('result', ev=>{
-          const d = JSON.parse(ev.data||'{}');
-          updateProgress(d.index||0, d.total||0);
-          jarvis(`Page result ${d.index||'?'} / ${d.total||'?'} ${toSlug(d.url||'')} → ${d.allOk ? 'OK' : 'NOK'}`);
-        });
-
-        es.addEventListener('done', ev=>{
-          const d = JSON.parse(ev.data||'{}');
-          runStatus.textContent = 'Hotovo.';
-          jarvis('Bulk done', d.outputUrl||'');
-          es.close();
-          setBusy(false);
-        });
-
-        es.addEventListener('error', ()=>{
-          runStatus.textContent = 'SSE přerušeno, pokračuji…';
-          jarvis('SSE error (auto-reconnect)');
-        });
-
-        es.addEventListener('ping', ()=>{});
-      }catch(err){
-        jarvis('Bulk start failed', err?.message||String(err));
-        runStatus.textContent = 'Nelze spustit audit.';
-        setBusy(false);
-      }
+    es.addEventListener('error', ()=>{
+      runStatus.textContent = 'SSE přerušeno, pokračuji…';
+      jarvis('SSE error (auto-reconnect)');
     });
 
-    (async()=>{ await ping() })();
+    es.addEventListener('ping', ()=>{});
+  }catch(err){
+    jarvis('Bulk start failed', err?.message||String(err));
+    runStatus.textContent = 'Nelze spustit audit.';
+    setBusy(false);
+  }
+});
+
+(async()=>{ await ping() })();
   </script>
 </body>
 </html>
