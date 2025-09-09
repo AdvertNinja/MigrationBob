@@ -7,14 +7,20 @@ using MigrationBob.Core;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var originsCsv = Environment.GetEnvironmentVariable("FRONTEND_ORIGINS") ?? "https://cemex.advert.ninja,http://localhost:5173";
+// ---- CORS jen v API (žádné add_header v Nginx) ----
+var originsCsv = Environment.GetEnvironmentVariable("FRONTEND_ORIGINS")
+                 ?? "https://cemex.advert.ninja,http://localhost:5173";
 var allowed = originsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.WithOrigins(allowed).AllowAnyHeader().AllowAnyMethod()));
+const string CorsPolicy = "ui";
+builder.Services.AddCors(o =>
+    o.AddPolicy(CorsPolicy, p => p.WithOrigins(allowed)
+                                  .AllowAnyHeader()
+                                  .AllowAnyMethod()));
 builder.Services.AddHttpClient();
 
 var app = builder.Build();
-app.UseCors();
+app.UseCors(CorsPolicy);
 
 var jobs = new ConcurrentDictionary<string, BulkJob>();
 
@@ -56,11 +62,9 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
                             .ToList();
 
             job.Total = urls.Count;
-
             await job.Events.Writer.WriteAsync(Sse("start", new { total = job.Total }));
 
             var results = new List<AuditResult>();
-
             for (int i = 0; i < urls.Count; i++)
             {
                 var u = urls[i];
@@ -69,65 +73,21 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
                     var r = await Auditor.AuditAsync(u);
                     results.Add(r);
 
-                    await job.Events.Writer.WriteAsync(Sse("page", new
-                    {
-                        index = i + 1,
-                        total = job.Total,
-                        url = r.Url.ToString(),
-                        checkTotal = r.Checks.Count
-                    }));
-
+                    await job.Events.Writer.WriteAsync(Sse("page", new { index = i + 1, total = job.Total, url = r.Url.ToString(), checkTotal = r.Checks.Count }));
                     for (int ci = 0; ci < r.Checks.Count; ci++)
                     {
                         var c = r.Checks[ci];
-                        await job.Events.Writer.WriteAsync(Sse("check", new
-                        {
-                            index = i + 1,
-                            total = job.Total,
-                            url = r.Url.ToString(),
-                            checkIndex = ci + 1,
-                            checkTotal = r.Checks.Count,
-                            ok = c.Ok,
-                            name = c.Check
-                        }));
+                        await job.Events.Writer.WriteAsync(Sse("check", new { index = i + 1, total = job.Total, url = r.Url.ToString(), checkIndex = ci + 1, checkTotal = r.Checks.Count, ok = c.Ok, name = c.Check }));
                     }
-
-                    await job.Events.Writer.WriteAsync(Sse("result", new
-                    {
-                        index = i + 1,
-                        total = job.Total,
-                        url = r.Url.ToString(),
-                        allOk = r.AllOk
-                    }));
+                    await job.Events.Writer.WriteAsync(Sse("result", new { index = i + 1, total = job.Total, url = r.Url.ToString(), allOk = r.AllOk }));
 
                     job.Done = i + 1;
                 }
                 catch (Exception ex)
                 {
-                    await job.Events.Writer.WriteAsync(Sse("page", new
-                    {
-                        index = i + 1,
-                        total = job.Total,
-                        url = u,
-                        checkTotal = 1
-                    }));
-                    await job.Events.Writer.WriteAsync(Sse("check", new
-                    {
-                        index = i + 1,
-                        total = job.Total,
-                        url = u,
-                        checkIndex = 1,
-                        checkTotal = 1,
-                        ok = false,
-                        name = "Unhandled error"
-                    }));
-                    await job.Events.Writer.WriteAsync(Sse("result", new
-                    {
-                        index = i + 1,
-                        total = job.Total,
-                        url = u,
-                        allOk = false
-                    }));
+                    await job.Events.Writer.WriteAsync(Sse("page",   new { index = i + 1, total = job.Total, url = u, checkTotal = 1 }));
+                    await job.Events.Writer.WriteAsync(Sse("check",  new { index = i + 1, total = job.Total, url = u, checkIndex = 1, checkTotal = 1, ok = false, name = "Unhandled error" }));
+                    await job.Events.Writer.WriteAsync(Sse("result", new { index = i + 1, total = job.Total, url = u, allOk = false }));
 
                     var ar = new AuditResult { Url = new Uri(u) };
                     ar.Checks.Add(new CheckResult("Unhandled error", false, ex.Message));
@@ -168,25 +128,12 @@ app.MapPost("/bulk/run", (string country, IHttpClientFactory f) =>
 app.MapGet("/bulk/status/{id}", (string id) =>
 {
     if (!jobs.TryGetValue(id, out var job)) return Results.NotFound(new { error = "not_found" });
-    return Results.Ok(new
-    {
-        job.Id,
-        job.Country,
-        job.Status,
-        job.Total,
-        job.Done,
-        job.OutputUrl,
-        job.Error
-    });
+    return Results.Ok(new { job.Id, job.Country, job.Status, job.Total, job.Done, job.OutputUrl, job.Error });
 });
 
 app.MapGet("/bulk/stream/{id}", async (HttpContext ctx, string id) =>
 {
-    if (!jobs.TryGetValue(id, out var job))
-    {
-        ctx.Response.StatusCode = 404;
-        return;
-    }
+    if (!jobs.TryGetValue(id, out var job)) { ctx.Response.StatusCode = 404; return; }
 
     ctx.Response.Headers.CacheControl = "no-cache";
     ctx.Response.Headers.Pragma = "no-cache";
