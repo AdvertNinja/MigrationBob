@@ -84,9 +84,9 @@ var badBtnLinks = await page.EvaluateAsync<int>(
     @"() => Array.from(document.querySelectorAll('a[class*=""btn""]'))
           .filter(a => {
               const h = (a.getAttribute('href') || '').trim().toLowerCase();
-              if (!h) return true;                 // prázdné
-              if (h === '#') return true;          // jen kotva
-              if (h.startsWith('javascript:')) return true; // pseudo-odkaz
+              if (!h) return true;                 
+              if (h === '#') return true;          
+              if (h.startsWith('javascript:')) return true; 
               return false;
           }).length;"
 );
