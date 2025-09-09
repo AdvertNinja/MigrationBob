@@ -46,12 +46,12 @@ public static class Auditor
         var title = await page.TitleAsync();
         var hasTitle = !string.IsNullOrWhiteSpace(title);
         result.Checks.Add(new("Title exists", hasTitle, hasTitle ? $"Title: \"{title}\"" : "Missing"));
-        result.Checks.Add(new("Title length 10–70", hasTitle && title.Length is >= 10 and <= 70, $"Length: {title?.Length ?? 0}"));
+      //  result.Checks.Add(new("Title length 10–70", hasTitle && title.Length is >= 10 and <= 70, $"Length: {title?.Length ?? 0}"));
 
         var metaDesc = await FirstContentSafeAsync(page, "meta[name='description']");
         var hasDesc = !string.IsNullOrWhiteSpace(metaDesc);
         result.Checks.Add(new("Meta description exists", hasDesc, hasDesc ? $"Description: \"{CollapseWs(metaDesc!)}\"" : "Missing"));
-        result.Checks.Add(new("Description length 50–160", hasDesc && metaDesc!.Length is >= 50 and <= 160, $"Length: {metaDesc?.Length ?? 0}"));
+     //   result.Checks.Add(new("Description length 50–160", hasDesc && metaDesc!.Length is >= 50 and <= 160, $"Length: {metaDesc?.Length ?? 0}"));
 
         var metaKeywords = await FirstContentSafeAsync(page, "meta[name='keywords']");
         var hasKeywords = !string.IsNullOrWhiteSpace(metaKeywords);
@@ -59,28 +59,31 @@ public static class Auditor
 
         var h1 = await TextContentSafeAsync(page, "h1");
         var hasH1 = !string.IsNullOrWhiteSpace(h1);
-        result.Checks.Add(new("H1 exists and is not empty", hasH1, hasH1 ? $"H1: \"{CollapseWs(h1!)}\"" : "Missing"));
+        result.Checks.Add(new("H1 existuje a není prázdný?", hasH1, hasH1 ? $"H1: \"{CollapseWs(h1!)}\"" : "Chybí"));
 
         var h1Count = await CountAsync(page, "h1");
-        result.Checks.Add(new("Exactly one H1", h1Count == 1, $"H1 count: {h1Count}"));
+       result.Checks.Add(new("Máme opravdu je jeden H1? ", h1Count == 1, $"počet H1: {h1Count}"));
 
-        var ogImage = await FirstContentSafeAsync(page, "meta[property='og:image']");
-        if (!string.IsNullOrWhiteSpace(ogImage))
-        {
-            var ogResolved = MakeAbsolute(uri, ogImage!);
-            using var ogCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSec));
-            var ogOk = await UrlOkFastAsync(http, ogResolved, ogCts.Token);
-            result.Checks.Add(new("og:image exists", true, ogImage!));
-            result.Checks.Add(new("og:image returns 200", ogOk, $"URL: {ogResolved}"));
-        }
-        else
-        {
-            result.Checks.Add(new("og:image exists", false, "Missing"));
-            result.Checks.Add(new("og:image returns 200", false, "No og:image to check"));
-        }
+//        var ogImage = await FirstContentSafeAsync(page, "meta[property='og:image']");
+//        if (!string.IsNullOrWhiteSpace(ogImage))
+//        {
+//            var ogResolved = MakeAbsolute(uri, ogImage!);
+//            using var ogCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSec));
+ //           var ogOk = await UrlOkFastAsync(http, ogResolved, ogCts.Token);
+//            result.Checks.Add(new("og:image exists", true, ogImage!));
+//            result.Checks.Add(new("og:image returns 200", ogOk, $"URL: {ogResolved}"));
+//        }
+//        else
+//        {
+//            result.Checks.Add(new("og:image exists", false, "Missing"));
+  //          result.Checks.Add(new("og:image returns 200", false, "No og:image to check"));
+//        }
 
+var ogImage = await FirstContentSafeAsync(page, "meta[property='og:image']");
+var hasOgImage = !string.IsNullOrWhiteSpace(ogImage);
+result.Checks.Add(new("OG Image máme", hasOgImage, hasOgImage ? ogImage! : "OG chybí"));
 
-var badBtnLinks = await page.EvaluateAsync<int>(
+        var badBtnLinks = await page.EvaluateAsync<int>(
     @"() => Array.from(document.querySelectorAll('a[class*=""btn""]'))
           .filter(a => {
               const h = (a.getAttribute('href') || '').trim().toLowerCase();
@@ -92,7 +95,7 @@ var badBtnLinks = await page.EvaluateAsync<int>(
 );
 
 result.Checks.Add(
-    new("Anchors with class '*btn*' have meaningful href",
+    new("Odkazy s '*btn*' mají smyslulpný odkaz ",
         badBtnLinks == 0,
         badBtnLinks == 0 ? "OK" : $"Invalid: {badBtnLinks}")
 );

@@ -14,8 +14,8 @@ if (!is_array($in)) $in = [];
 $country   = trim((string)($in['country'] ?? ''));
 $reportUrl = trim((string)($in['reportUrl'] ?? ''));
 $total     = (int)($in['total'] ?? 0);
-$ok        = (int)($in['ok'] ?? 0);
-$nok       = (int)($in['nok'] ?? 0);
+$okCount   = (int)($in['ok'] ?? 0);
+$nokCount  = (int)($in['nok'] ?? 0);
 $pages     = is_array($in['pages'] ?? null) ? $in['pages'] : [];
 
 if ($country === '' || $total <= 0) {
@@ -39,9 +39,16 @@ $to        = $authEmail ?: 'theadvertninja@gmail.com';
 $from      = 'cemex@advert.ninja';
 $subject   = 'Souhrn auditu — '.$country;
 
-$h  = "<div style='background:#fff;border-radius:20px;padding:20px;font-family:Arial,sans-serif;color:#111'>";
+$percentOk = $total > 0 ? round(($okCount / $total) * 100, 1) : 0.0;
+$isReady   = ($percentOk === 100.0);
+
+$h  = "<div style='background:#fff;border:1px solid #000;border-radius:10px;padding:20px;font-family:Arial,sans-serif;color:#111'>";
 $h .= "<h2 style='margin:0 0 12px'>Souhrn auditu — ".htmlspecialchars($country,ENT_QUOTES,'UTF-8')."</h2>";
-$h .= "<p><strong>Výsledky:</strong> ".(int)$ok." OK • ".(int)$nok." NOK • ".(int)$total." celkem</p>";
+$h .= "<div style='font-size:32px;line-height:1.2;font-weight:700;margin:0 0 8px'>Audit byl úspěšný na {$percentOk}%</div>";
+$h .= $isReady
+  ? "<div style='font-size:16px;margin:0 0 16px'>Gratulujeme! Stránky jsou připraveny pro spuštění!</div>"
+  : "<div style='font-size:16px;margin:0 0 16px'>Stránky nejsou připraveny pro spuštění.</div>";
+$h .= "<p><strong>Výsledky:</strong> ".(int)$okCount." OK • ".(int)$nokCount." NOK • ".(int)$total." celkem</p>";
 
 if ($reportUrl !== '') {
   $h .= "<p><a href='".htmlspecialchars($reportUrl,ENT_QUOTES,'UTF-8')."'>Stažení JSON reportu</a></p>";
@@ -58,12 +65,15 @@ if (!empty($pages)) {
     $h  .= "<div style='font-weight:600;margin-bottom:6px'>".$url."</div>";
     $checks = is_array($p['checks'] ?? null) ? $p['checks'] : [];
     if (!empty($checks)) {
-      $h .= "<ul style='margin:6px 0;padding-left:18px'>";
+      $h .= "<ul style='margin:6px 0;padding-left:0;list-style:none'>";
       foreach ($checks as $c) {
-        $ok   = !empty($c['ok']);
+        $isOk = !empty($c['ok']);
         $name = htmlspecialchars((string)($c['name'] ?? ''), ENT_QUOTES, 'UTF-8');
         $det  = htmlspecialchars((string)($c['details'] ?? ''), ENT_QUOTES, 'UTF-8');
-        $h   .= "<li>".($ok ? "OK" : "NOK")." — <strong>{$name}</strong>".($det ? " — {$det}" : "")."</li>";
+        $bg   = $isOk ? "#eaffea" : "#ffecec";
+        $col  = $isOk ? "#0a0"    : "#a00";
+        $tag  = $isOk ? "OK"      : "NOK";
+        $h   .= "<li style='background:{$bg};color:{$col};padding:6px 8px;border-radius:6px;margin:6px 0;border:1px solid #ddd'><span style='font-weight:700'>{$tag}</span> — <strong>{$name}</strong>".($det ? " — {$det}" : "")."</li>";
       }
       $h .= "</ul>";
     }
@@ -71,7 +81,7 @@ if (!empty($pages)) {
   }
 }
 
-$h .= "<p style='color:#777;font-size:12px'>Odesláno: ".date('Y-m-d H:i:s')."</p>";
+$h .= "<p style='color:#777;font-size:12px;margin-top:8px'>Odesláno: ".date('Y-m-d H:i:s')."</p>";
 $h .= "</div>";
 
 $headers  = "MIME-Version: 1.0\r\n";
