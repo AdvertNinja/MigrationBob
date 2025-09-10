@@ -2,7 +2,7 @@
 <html lang="cs">
 <head>
   <meta charset="UTF-8" />
-  <title>Migration Bob — Bulk</title>
+  <title>Migrační Bobové</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
   <style>
@@ -167,7 +167,7 @@
     function updateProgress(i,total){
       const pct = total ? Math.round((i/total)*100) : 0;
       runStatus.textContent = `Kontroluji: ${i}/${total}`;
-      runProgress.textContent = `Progress: ${i}/${total} (${pct}%)`;
+      runProgress.textContent = `Průběh: ${i}/${total} (${pct}%)`;
       runSub.textContent = `${i}/${total}`;
     }
 
@@ -205,11 +205,11 @@
       if(!ready){ setBusy(false); return; }
 
       runStatus.textContent = `Spouštím audit pro ${country}…`;
-      jarvis('Bulk start', country);
+      jarvis('Spouštímě hromadně zemi:', country);
 
       try{
         const { jobId } = await startBulk(country);
-        if(!jobId) throw new Error('Missing jobId');
+        if(!jobId) throw new Error('Nemáme jobId');
         jarvis('Job ID', jobId);
 
         const es = new EventSource(`${API}/bulk/stream/${jobId}`);
@@ -243,7 +243,7 @@
           const d = JSON.parse(ev.data||'{}');
           jarvis('SSE start', ev.data);
           totalExpected = d.total||0;
-          runProgress.textContent = `Progress: 0/${totalExpected} (0%)`;
+          runProgress.textContent = `Průběh: 0/${totalExpected} (0%)`;
           runSub.textContent = '0/0';
           runStatus.textContent = '';
         });
@@ -296,13 +296,13 @@
         es.addEventListener('error', ()=>{
           if(finished) return;
           runStatus.textContent = 'SSE přerušeno, pokračuji…';
-          jarvis('SSE error (auto-reconnect)');
+          jarvis('SSE error (auto-reconnect na server)');
           maybeAutoFinalize();
         });
 
         es.addEventListener('ping', ()=>{});
       }catch(err){
-        jarvis('Bulk start failed', err?.message||String(err));
+        jarvis('Nejde psustit hromadně', err?.message||String(err));
         runStatus.textContent = 'Nelze spustit audit.';
         setBusy(false);
       }

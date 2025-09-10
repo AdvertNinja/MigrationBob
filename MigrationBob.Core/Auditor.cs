@@ -35,23 +35,33 @@ public static class Auditor
         var context = await browser.NewContextAsync(new() { IgnoreHTTPSErrors = true });
         var page = await context.NewPageAsync();
 
-        var nav = await page.GotoAsync(uri.ToString(), new()
+        IResponse? nav = null;
+        bool loadOk = true;
+        string loadMsg = "OK";
+        try
         {
-            WaitUntil = WaitUntilState.DOMContentLoaded,
-            Timeout = timeoutSec * 1000
-        });
+            nav = await page.GotoAsync(uri.ToString(), new()
+            {
+                WaitUntil = WaitUntilState.DOMContentLoaded,
+                Timeout = timeoutSec * 1000
+            });
+        }
+        catch (Exception ex)
+        {
+            loadOk = false;
+            loadMsg = ex.Message;
+        }
 
+        result.Checks.Add(new("Stránka se načetla bez chyby?", loadOk, loadMsg));
         result.Checks.Add(new("stránka dáva 200 OK", nav?.Status == 200, $"Status: {(nav?.Status.ToString() ?? "null")}"));
 
         var title = await page.TitleAsync();
         var hasTitle = !string.IsNullOrWhiteSpace(title);
         result.Checks.Add(new("Title máme?", hasTitle, hasTitle ? $"Title: \"{title}\"" : "Title chybí"));
-      //  result.Checks.Add(new("Title length 10–70", hasTitle && title.Length is >= 10 and <= 70, $"Length: {title?.Length ?? 0}"));
 
         var metaDesc = await FirstContentSafeAsync(page, "meta[name='description']");
         var hasDesc = !string.IsNullOrWhiteSpace(metaDesc);
         result.Checks.Add(new("Meta description existuje?", hasDesc, hasDesc ? $"Description: \"{CollapseWs(metaDesc!)}\"" : "Chybí"));
-     //   result.Checks.Add(new("Description length 50–160", hasDesc && metaDesc!.Length is >= 50 and <= 160, $"Length: {metaDesc?.Length ?? 0}"));
 
         var metaKeywords = await FirstContentSafeAsync(page, "meta[name='keywords']");
         var hasKeywords = !string.IsNullOrWhiteSpace(metaKeywords);
@@ -62,44 +72,69 @@ public static class Auditor
         result.Checks.Add(new("H1 existuje a není prázdný?", hasH1, hasH1 ? $"H1: \"{CollapseWs(h1!)}\"" : "Chybí"));
 
         var h1Count = await CountAsync(page, "h1");
-       result.Checks.Add(new("Máme opravdu je jeden H1? ", h1Count == 1, $"počet H1: {h1Count}"));
+        result.Checks.Add(new("Máme opravdu je jeden H1? ", h1Count == 1, $"počet H1: {h1Count}"));
 
-//        var ogImage = await FirstContentSafeAsync(page, "meta[property='og:image']");
-//        if (!string.IsNullOrWhiteSpace(ogImage))
-//        {
-//            var ogResolved = MakeAbsolute(uri, ogImage!);
-//            using var ogCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSec));
- //           var ogOk = await UrlOkFastAsync(http, ogResolved, ogCts.Token);
-//            result.Checks.Add(new("og:image exists", true, ogImage!));
-//            result.Checks.Add(new("og:image returns 200", ogOk, $"URL: {ogResolved}"));
-//        }
-//        else
-//        {
-//            result.Checks.Add(new("og:image exists", false, "Missing"));
-  //          result.Checks.Add(new("og:image returns 200", false, "No og:image to check"));
-//        }
+        var ogImage = await FirstContentSafeAsync(page, "meta[property='og:image']");
+        var hasOgImage = !string.IsNullOrWhiteSpace(ogImage);
+        result.Checks.Add(new("OG Image máme", hasOgImage, hasOgImage ? ogImage! : "OG chybí"));
 
-var ogImage = await FirstContentSafeAsync(page, "meta[property='og:image']");
-var hasOgImage = !string.IsNullOrWhiteSpace(ogImage);
-result.Checks.Add(new("OG Image máme", hasOgImage, hasOgImage ? ogImage! : "OG chybí"));
+        var nonsenseHrefs = await page.EvaluateAsync<string[]>(
+        @"() => {
+          const bad = [];
+          const here = new URL(location.href);
+          const baseNoHash = here.origin + here.pathname + here.search;
+
+          for (const a of document.querySelectorAll('a[href]')) {
+            const raw = (a.getAttribute('href') || '').trim();
+            if (!raw) { bad.push(raw); continue; }
+            const l = raw.toLowerCase();
+
+            if (l === '#' || l.startsWith('javascript:')) { bad.push(raw); continue; }
+            if (raw.startsWith('#')) { bad.push(raw); continue; }
+
+            try {
+              const u = new URL(raw, location.href);
+              const uNoHash = u.origin + u.pathname + u.search;
+              if (uNoHash === baseNoHash) { bad.push(raw); continue; }
+              if (u.href === 'https://cxprod-web.cemex.com/not-found') { bad.push(raw); continue; }
+            } catch(e) {
+              bad.push(raw);
+            }
+          }
+          return bad.slice(0, 20);
+        }");
+
+        var nonsenseCount = nonsenseHrefs.Length;
+        result.Checks.Add(new(
+          "Nesmyslné odkazy (prázdné/#/javascript/self)",
+          nonsenseCount == 0,
+          nonsenseCount == 0 ? "OK" : $"Našli jsme {nonsenseCount} e.g. {string.Join(", ", nonsenseHrefs.Take(5))}"
+        ));
 
         var badBtnLinks = await page.EvaluateAsync<int>(
-    @"() => Array.from(document.querySelectorAll('a[class*=""btn""]'))
-          .filter(a => {
-              const h = (a.getAttribute('href') || '').trim().toLowerCase();
-              if (!h) return true;                 
-              if (h === '#') return true;          
-              if (h.startsWith('javascript:')) return true; 
-              return false;
-          }).length;"
-);
+        @"() => Array.from(document.querySelectorAll('a[class*=""btn""]'))
+              .filter(a => {
+                  const raw = (a.getAttribute('href') || '').trim();
+                  const h = raw.toLowerCase();
+                  if (!raw) return true;
+                  if (h === '#') return true;
+                  if (h.startsWith('javascript:')) return true;
+                  if (raw.startsWith('#')) return true;
+                  try {
+                    const u = new URL(raw, location.href);
+                    const here = new URL(location.href);
+                    const sameNoHash = (u.origin + u.pathname + u.search) === (here.origin + here.pathname + here.search);
+                    if (sameNoHash) return true;
+                    if (u.href === 'https://cxprod-web.cemex.com/not-found') return true;
+                  } catch(e) { return true; }
+                  return false;
+              }).length;");
 
-result.Checks.Add(
-    new("Odkazy s '*btn*' mají smyslulpný odkaz ",
-        badBtnLinks == 0,
-        badBtnLinks == 0 ? "OK" : $"Invalid: {badBtnLinks}")
-);
-
+        result.Checks.Add(
+            new("Odkazy s '*btn*' mají smysluplný odkaz",
+                badBtnLinks == 0,
+                badBtnLinks == 0 ? "OK" : $"Invalid: {badBtnLinks}")
+        );
 
         var imageUrls = await CollectAllImageUrlsAsync(page);
         var placeholders = imageUrls
@@ -109,13 +144,42 @@ result.Checks.Add(
         var noPlaceholders = placeholders.Count == 0;
         result.Checks.Add(new("Jsou všechny placeholdery vyměněny?", noPlaceholders, noPlaceholders ? "OK" : $"Našli jsme {placeholders.Count} e.g. {string.Join(", ", placeholders)}"));
 
-        var (brokenCount, brokenSamples) = await CheckInternalLinksFastAsync(
+        var (brokenInternal, brokenInternalSamples) = await CheckLinksFastAsync(
+            http, page, uri, onlySameHost: true,
+            perLinkTimeoutMs: 6000, maxToCheck: 30, maxParallel: 6, totalCapMs: 15000);
+        result.Checks.Add(new("Vadné interní odkazy",
+            brokenInternal == 0,
+            brokenInternal == 0 ? "OK" : $"Vadných: {brokenInternal} e.g. {string.Join(", ", brokenInternalSamples)}"));
+
+        var (brokenExternal, brokenExternalSamples) = await CheckLinksFastAsync(
+            http, page, uri, onlySameHost: false,
+            perLinkTimeoutMs: 6000, maxToCheck: 30, maxParallel: 6, totalCapMs: 15000);
+        result.Checks.Add(new("Vadné externí odkazy",
+            brokenExternal == 0,
+            brokenExternal == 0 ? "OK" : $"Vadných: {brokenExternal} e.g. {string.Join(", ", brokenExternalSamples)}"));
+
+        var (noPresentationCount, noPresentationSamples) = await CheckLinksNoPresentationAsync(
             http, page, uri,
-            perLinkTimeoutMs: 6000,
-            maxToCheck: 30,
-            maxParallel: 6,
-            totalCapMs: 15000);
-        result.Checks.Add(new("Vadný odkazy", brokenCount == 0, brokenCount == 0 ? "OK" : $"Vadných: {brokenCount} e.g. {string.Join(", ", brokenSamples)}"));
+            textThreshold: 80,
+            perLinkTimeoutMs: 8000,
+            maxToCheck: 40,
+            maxParallel: 4,
+            totalCapMs: 20000);
+        result.Checks.Add(new(
+            "Odkazy vedou na stránky bez prezentace",
+            noPresentationCount == 0,
+            noPresentationCount == 0 ? "OK" : $"Našli jsme {noPresentationCount} e.g. {string.Join(", ", noPresentationSamples)}"
+        ));
+
+        var notFoundLinks = await page.EvaluateAsync<int>(
+        @"() => Array.from(document.querySelectorAll('a[href]'))
+              .filter(a => {
+                 try {
+                   const u = new URL(a.getAttribute('href') || '', location.href);
+                   return u.href === 'https://cxprod-web.cemex.com/not-found';
+                 } catch(e){ return false; }
+              }).length;");
+        result.Checks.Add(new("Odkazy vedoucí na /not-found", notFoundLinks == 0, notFoundLinks == 0 ? "OK" : $"Našli jsme {notFoundLinks}"));
 
         return result;
     }
@@ -182,8 +246,9 @@ result.Checks.Add(
             .ToList();
     }
 
-    static async Task<(int brokenCount, List<string> samples)> CheckInternalLinksFastAsync(
-        HttpClient http, IPage page, Uri pageUri, int perLinkTimeoutMs, int maxToCheck, int maxParallel, int totalCapMs)
+    static async Task<(int brokenCount, List<string> samples)> CheckLinksFastAsync(
+        HttpClient http, IPage page, Uri pageUri, bool onlySameHost,
+        int perLinkTimeoutMs, int maxToCheck, int maxParallel, int totalCapMs)
     {
         var hrefs = await page.EvaluateAsync<string[]>(
         @"() => Array.from(document.querySelectorAll('a[href]'))
@@ -197,7 +262,9 @@ result.Checks.Add(
                      && !h.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase)
                      && !h.StartsWith("tel:", StringComparison.OrdinalIgnoreCase))
             .Select(h => LooksLikeAbsolute(h) ? h : new Uri(pageUri, h).ToString())
-            .Where(abs => Uri.TryCreate(abs, UriKind.Absolute, out var u) && u.Host.Equals(pageUri.Host, StringComparison.OrdinalIgnoreCase))
+            .Where(abs => Uri.TryCreate(abs, UriKind.Absolute, out var u)
+                       && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps)
+                       && (!onlySameHost || u.Host.Equals(pageUri.Host, StringComparison.OrdinalIgnoreCase)))
             .Distinct()
             .Take(maxToCheck)
             .ToList();
@@ -236,6 +303,82 @@ result.Checks.Add(
         await Task.WhenAll(tasks);
         var samples = bag.Distinct().Take(5).ToList();
         return (broken, samples);
+    }
+
+    static async Task<(int noPresentation, List<string> samples)> CheckLinksNoPresentationAsync(
+        HttpClient http, IPage page, Uri pageUri,
+        int textThreshold, int perLinkTimeoutMs, int maxToCheck, int maxParallel, int totalCapMs)
+    {
+        var hrefs = await page.EvaluateAsync<string[]>(
+        @"() => Array.from(document.querySelectorAll('a[href]'))
+            .map(a => a.getAttribute('href') || '')
+            .filter(h => h && h.trim() !== '')");
+
+        var links = hrefs
+            .Select(h => h.Trim())
+            .Where(h => !h.StartsWith("#")
+                     && !h.StartsWith("javascript:", StringComparison.OrdinalIgnoreCase)
+                     && !h.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase)
+                     && !h.StartsWith("tel:", StringComparison.OrdinalIgnoreCase))
+            .Select(h => LooksLikeAbsolute(h) ? h : new Uri(pageUri, h).ToString())
+            .Where(abs => Uri.TryCreate(abs, UriKind.Absolute, out var u)
+                       && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps))
+            .Distinct()
+            .Take(maxToCheck)
+            .ToList();
+
+        using var totalCts = new CancellationTokenSource(totalCapMs);
+        using var sem = new SemaphoreSlim(maxParallel);
+
+        int count = 0;
+        var bag = new ConcurrentBag<string>();
+
+        var tasks = links.Select(async link =>
+        {
+            await sem.WaitAsync(totalCts.Token).ConfigureAwait(false);
+            try
+            {
+                using var perCts = CancellationTokenSource.CreateLinkedTokenSource(totalCts.Token);
+                perCts.CancelAfter(perLinkTimeoutMs);
+                var len = await EstimateTextLenAsync(http, link, perCts.Token);
+                if (len < textThreshold)
+                {
+                    Interlocked.Increment(ref count);
+                    bag.Add(link);
+                }
+            }
+            catch
+            {
+                Interlocked.Increment(ref count);
+                bag.Add(link);
+            }
+            finally
+            {
+                sem.Release();
+            }
+        }).ToList();
+
+        await Task.WhenAll(tasks);
+        var samples = bag.Distinct().Take(5).ToList();
+        return (count, samples);
+    }
+
+    static async Task<int> EstimateTextLenAsync(HttpClient http, string url, CancellationToken ct)
+    {
+        using var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+        if ((int)resp.StatusCode >= 400) return 0;
+
+        var media = resp.Content.Headers.ContentType?.MediaType ?? "";
+        var html = await resp.Content.ReadAsStringAsync(ct);
+
+        html = Regex.Replace(html, @"<script[\s\S]*?</script>", "", RegexOptions.IgnoreCase);
+        html = Regex.Replace(html, @"<style[\s\S]*?</style>", "", RegexOptions.IgnoreCase);
+        html = Regex.Replace(html, @"<!--[\s\S]*?-->", "", RegexOptions.IgnoreCase);
+        var text = Regex.Replace(html, "<[^>]+>", " ", RegexOptions.IgnoreCase);
+        text = WebUtility.HtmlDecode(text);
+        text = Regex.Replace(text, @"\s+", " ").Trim();
+
+        return text.Length;
     }
 
     static async Task<bool> UrlOkFastAsync(HttpClient http, string url, CancellationToken ct)
