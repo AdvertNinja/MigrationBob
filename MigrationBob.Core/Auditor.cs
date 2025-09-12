@@ -182,54 +182,47 @@ public static class Auditor
         result.Checks.Add(new("Odkazy vedoucí na /not-found", notFoundLinks == 0, notFoundLinks == 0 ? "OK" : $"Našli jsme {notFoundLinks}"));
 
 
-var hiddenFragmentRoots = await page.EvaluateAsync<string[]>(@"
+var hiddenByEye = await page.EvaluateAsync<string[]>(@"
 () => {
-  const scope = document.querySelector('main, [role=""main""], #main-content') || document.body;
-  const roots = Array.from(scope.querySelectorAll('div[id^=""fragment-""], [data-fragment-entry-link-id]'))
-    .filter(el => !el.closest('header, footer, nav, [role=""navigation""]'));
-
-  const cssText = Array.from(document.querySelectorAll('style')).map(s => s.textContent || '').join('\n');
-
-  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const hasDirectCssHide = (id, classes) => {
-    if (!cssText) return false;
-    const blocks = [];
-    if (id) {
-      blocks.push(new RegExp(`(^|[,{\\s])#${esc(id)}\\s*(?:,|\\{)([\\s\\S]*?)\\}`, 'i'));
-    }
-    for (const c of classes) {
-      if (!c) continue;
-      blocks.push(new RegExp(`(^|[,{\\s])\\.${esc(c)}\\s*(?:,|\\{)([\\s\\S]*?)\\}`, 'i'));
-    }
-    for (const rx of blocks) {
-      const m = cssText.match(rx);
-      if (m && /display\\s*:\\s*none|visibility\\s*:\\s*hidden/i.test(m[2])) return true;
-    }
+  const inMain = (el) => !!el.closest('main,[role=""main""],#main-content');
+  const skip = (el) => !!el.closest('header,footer,nav,[role=""navigation""]');
+  const lfrSheets = Array.from(document.styleSheets).filter(s => (s.href || '').includes('/o/layout-common-styles/'));
+  const hasLfrHideRuleFor = (el) => {
+    const classes = Array.from(el.classList).filter(c => c.startsWith('lfr-layout-structure-item-'));
+    if (!classes.length || !lfrSheets.length) return false;
+    try {
+      for (const sheet of lfrSheets) {
+        const rules = sheet.cssRules || [];
+        for (const r of rules) {
+          if (!r.selectorText) continue;
+          for (const c of classes) {
+            if (r.selectorText.includes('.' + c) && /display\s*:\s*none/i.test(r.cssText)) return true;
+          }
+        }
+      }
+    } catch(e) { /* cross-origin */ }
     return false;
   };
 
   const out = [];
-  for (const el of roots) {
-    const id = el.id || el.getAttribute('data-fragment-entry-link-id') || '';
-    const clsTokens = (el.className || '').toString().trim().split(/\\s+/).filter(Boolean);
+  document.querySelectorAll('[class*=""lfr-layout-structure-item-""]').forEach(el => {
+    if (!inMain(el) || skip(el)) return;
     const cs = getComputedStyle(el);
-    const byComputed = cs.display === 'none' || cs.visibility === 'hidden';
-    const byInline   = /display\\s*:\\s*none|visibility\\s*:\\s*hidden/i.test((el.getAttribute('style')||''));
-    const byDirectCss= hasDirectCssHide(id, clsTokens);
-
-    if (byComputed || byInline || byDirectCss) {
-      const label = (el.querySelector('h1,h2,h3,h4,h5,h6,a,span,p')?.textContent || '').trim().slice(0,60);
-      out.push(`${id || (clsTokens[0]||el.tagName.toLowerCase())}:${label}`);
+    if (cs.display === 'none' && hasLfrHideRuleFor(el)) {
+      const cls = Array.from(el.classList).filter(c => c.startsWith('lfr-layout-structure-item-'))[0] || '';
+      const frag = el.querySelector('[id^=""fragment-""]')?.id || '';
+      out.push(cls + (frag ? (' #' + frag) : ''));
     }
-  }
-  return out;
-}");
+  });
+  return out.slice(0, 20);
+}
+");
+
 result.Checks.Add(new(
   "Fragmenty skryté očíčkem v LFR (obsah, bez navigace/footeru)",
-  hiddenFragmentRoots.Length == 0,
-  hiddenFragmentRoots.Length == 0 ? "OK" : $"Našli jsme {hiddenFragmentRoots.Length} e.g. {string.Join(" | ", hiddenFragmentRoots.Take(3))}"
+  hiddenByEye.Length == 0,
+  hiddenByEye.Length == 0 ? "OK" : $"Našli jsme {hiddenByEye.Length} e.g. {string.Join(", ", hiddenByEye.Take(3))}"
 ));
-
 
 
 
