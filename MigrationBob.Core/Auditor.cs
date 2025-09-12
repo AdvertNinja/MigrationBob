@@ -184,31 +184,53 @@ public static class Auditor
 
 var hiddenFragments = await page.EvaluateAsync<string[]>(@"
 () => {
-  const hidden = [];
-  const nodes = document.querySelectorAll('[data-fragment-entry-link-id]');
-  for (const el of nodes) {
-    if (el.closest('header, footer, nav')) continue;
-    const style = (el.getAttribute('style') || '').toLowerCase();
-    const classes = el.className || '';
-    if (el.hasAttribute('hidden')) { hidden.push(el.outerHTML.slice(0, 80)); continue; }
-    if (el.getAttribute('aria-hidden') === 'true') { hidden.push(el.outerHTML.slice(0, 80)); continue; }
-    if (el.getAttribute('data-lfr-hidden') === 'true' || el.getAttribute('data-fragments-editor-hidden') === 'true') {
-      hidden.push(el.outerHTML.slice(0, 80)); continue;
+  const containers = document.querySelectorAll('main, [role=""main""], #main-content');
+  const scope = containers.length ? containers : [document.body];
+  const isHiddenDeep = (el) => {
+    let n = el;
+    while (n && n !== document.body) {
+      if (n.hasAttribute('hidden')) return true;
+      if ((n.getAttribute('aria-hidden') || '').toLowerCase() === 'true') return true;
+      const cs = getComputedStyle(n);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return true;
+      n = n.parentElement;
     }
-    if (style.includes('display:none') || style.includes('visibility:hidden')) {
-      hidden.push(el.outerHTML.slice(0, 80)); continue;
-    }
-    if (/\bd-none\b/i.test(classes) || /\bd-(sm|md|lg|xl|xxl)-none\b/i.test(classes) || /\b(hidden|hide)\b/i.test(classes)) {
-      hidden.push(el.outerHTML.slice(0, 80)); continue;
+    return false;
+  };
+  const skip = (el) => !!el.closest('header, footer, nav, [role=""navigation""]');
+  const roots = [];
+  for (const root of scope) {
+    root.querySelectorAll('[data-fragment-entry-link-id], div[id^=""fragment-""]').forEach(n => { if (!skip(n)) roots.push(n); });
+  }
+  const out = new Set();
+  const add = (el) => {
+    const id = el.getAttribute('data-lfr-editable-id') || el.id || '';
+    const cls = (el.className || '').toString().trim().split(/\s+/).slice(0,3).join('.');
+    const tag = el.tagName.toLowerCase();
+    out.add(`<${tag}${id?`#${id}`:''}${cls?`.${cls}`:''}>`);
+  };
+  for (const root of roots) {
+    const targetNodes = [root, ...root.querySelectorAll('*')];
+    for (const el of targetNodes) {
+      if (skip(el)) continue;
+      if (!el.closest('[data-fragment-entry-link-id], div[id^=""fragment-""]')) continue;
+      const cls = (el.className || '').toString();
+      const style = (el.getAttribute('style') || '').toLowerCase();
+      if (el.hasAttribute('hidden')) { add(el); continue; }
+      if ((el.getAttribute('aria-hidden') || '').toLowerCase() === 'true') { add(el); continue; }
+      if (/\bd-none\b/i.test(cls) || /\bd-(?:sm|md|lg|xl|xxl)-none\b/i.test(cls) || /\bhidden\b/i.test(cls) || /\bhide\b/i.test(cls)) { add(el); continue; }
+      if (style.includes('display:none') || style.includes('visibility:hidden') || /opacity\s*:\s*0(\.0+)?/.test(style)) { add(el); continue; }
+      if (isHiddenDeep(el)) { add(el); continue; }
+      const r = el.getBoundingClientRect();
+      if ((r.width === 0 && r.height === 0) || el.offsetParent === null) { add(el); continue; }
     }
   }
-  return hidden;
+  return Array.from(out);
 }");
-
 result.Checks.Add(new(
-    "Skryté fragmenty ve zdrojáku",
-    hiddenFragments.Length == 0,
-    hiddenFragments.Length == 0 ? "OK" : $"Našli jsme {hiddenFragments.Length} e.g. {string.Join(" | ", hiddenFragments.Take(3))}"
+  "Skryté fragmenty uživatelem (obsah, bez navigace/footeru a tamtý nějaký editační mezivstvy)",
+  hiddenFragments.Length == 0,
+  hiddenFragments.Length == 0 ? "OK" : $"Bobínkové našli: {hiddenFragments.Length} e.g. {string.Join(" | ", hiddenFragments.Take(3))}"
 ));
 
 
