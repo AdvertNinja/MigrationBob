@@ -111,30 +111,30 @@ public static class Auditor
           nonsenseCount == 0 ? "OK" : $"Našli jsme {nonsenseCount} e.g. {string.Join(", ", nonsenseHrefs.Take(5))}"
         ));
 
-        var badBtnLinks = await page.EvaluateAsync<int>(
-        @"() => Array.from(document.querySelectorAll('a[class*=""btn""]'))
-              .filter(a => {
-                  const raw = (a.getAttribute('href') || '').trim();
-                  const h = raw.toLowerCase();
-                  if (!raw) return true;
-                  if (h === '#') return true;
-                  if (h.startsWith('javascript:')) return true;
-                  if (raw.startsWith('#')) return true;
-                  try {
-                    const u = new URL(raw, location.href);
-                    const here = new URL(location.href);
-                    const sameNoHash = (u.origin + u.pathname + u.search) === (here.origin + here.pathname + here.search);
-                    if (sameNoHash) return true;
-                    if (u.href === 'https://cxprod-web.cemex.com/not-found') return true;
-                  } catch(e) { return true; }
-                  return false;
-              }).length;");
-
-        result.Checks.Add(
-            new("Odkazy s '*btn*' mají smysluplný odkaz",
-                badBtnLinks == 0,
-                badBtnLinks == 0 ? "OK" : $"Invalid: {badBtnLinks}")
-        );
+ //       var badBtnLinks = await page.EvaluateAsync<int>(
+  //      @"() => Array.from(document.querySelectorAll('a[class*=""btn""]'))
+  //            .filter(a => {
+//                 const raw = (a.getAttribute('href') || '').trim();
+//                  const h = raw.toLowerCase();
+//                  if (!raw) return true;
+//                  if (h === '#') return true;
+//                  if (h.startsWith('javascript:')) return true;
+//                  if (raw.startsWith('#')) return true;
+//                 try {
+//                    const u = new URL(raw, location.href);
+//                    const here = new URL(location.href);
+//                    const sameNoHash = (u.origin + u.pathname + u.search) === (here.origin + here.pathname + here.search);
+//                    if (sameNoHash) return true;
+//                    if (u.href === 'https://cxprod-web.cemex.com/not-found') return true;
+//                  } catch(e) { return true; }
+//                  return false;
+//              }).length;");
+//
+//        result.Checks.Add(
+//            new("Odkazy s '*btn*' mají smysluplný odkaz",
+//                badBtnLinks == 0,
+ //               badBtnLinks == 0 ? "OK" : $"Invalid: {badBtnLinks}")
+//        );
 
         var imageUrls = await CollectAllImageUrlsAsync(page);
         var placeholders = imageUrls
@@ -180,6 +180,39 @@ public static class Auditor
                  } catch(e){ return false; }
               }).length;");
         result.Checks.Add(new("Odkazy vedoucí na /not-found", notFoundLinks == 0, notFoundLinks == 0 ? "OK" : $"Našli jsme {notFoundLinks}"));
+
+
+var hiddenFragments = await page.EvaluateAsync<string[]>(@"
+() => {
+  const hidden = [];
+  const nodes = document.querySelectorAll('[data-fragment-entry-link-id]');
+  for (const el of nodes) {
+    if (el.closest('header, footer, nav')) continue;
+    const style = (el.getAttribute('style') || '').toLowerCase();
+    const classes = el.className || '';
+    if (el.hasAttribute('hidden')) { hidden.push(el.outerHTML.slice(0, 80)); continue; }
+    if (el.getAttribute('aria-hidden') === 'true') { hidden.push(el.outerHTML.slice(0, 80)); continue; }
+    if (el.getAttribute('data-lfr-hidden') === 'true' || el.getAttribute('data-fragments-editor-hidden') === 'true') {
+      hidden.push(el.outerHTML.slice(0, 80)); continue;
+    }
+    if (style.includes('display:none') || style.includes('visibility:hidden')) {
+      hidden.push(el.outerHTML.slice(0, 80)); continue;
+    }
+    if (/\bd-none\b/i.test(classes) || /\bd-(sm|md|lg|xl|xxl)-none\b/i.test(classes) || /\b(hidden|hide)\b/i.test(classes)) {
+      hidden.push(el.outerHTML.slice(0, 80)); continue;
+    }
+  }
+  return hidden;
+}");
+
+result.Checks.Add(new(
+    "Skryté fragmenty ve zdrojáku",
+    hiddenFragments.Length == 0,
+    hiddenFragments.Length == 0 ? "OK" : $"Našli jsme {hiddenFragments.Length} e.g. {string.Join(" | ", hiddenFragments.Take(3))}"
+));
+
+
+
 
         return result;
     }

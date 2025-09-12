@@ -35,7 +35,7 @@ function extractEmail($v) {
 
 $rawAuth   = $_SESSION['auth_user'] ?? '';
 $authEmail = extractEmail($rawAuth);
-$to        = $authEmail ?: 'theadvertninja@gmail.com';
+$to        = $authEmail ?: 'theadvertninja@gmail.com, barbora.vernerova@lundegaard.eu';
 $from      = 'cemex@advert.ninja';
 $subject   = 'Souhrn auditu — '.$country;
 
