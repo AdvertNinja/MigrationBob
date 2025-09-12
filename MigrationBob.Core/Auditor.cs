@@ -185,27 +185,41 @@ public static class Auditor
 var hiddenFragmentRoots = await page.EvaluateAsync<string[]>(@"
 () => {
   const scope = document.querySelector('main, [role=""main""], #main-content') || document.body;
-  const roots = Array.from(scope.querySelectorAll('[data-fragment-entry-link-id], div[id^=""fragment-""]'))
+  const roots = Array.from(scope.querySelectorAll('div[id^=""fragment-""], [data-fragment-entry-link-id]'))
     .filter(el => !el.closest('header, footer, nav, [role=""navigation""]'));
+  const styleTags = Array.from(document.querySelectorAll('style')).map(s => s.textContent || '');
+  const hasDirectRule = (id) => {
+    if (!id) return false;
+    const rx = new RegExp(`#${id}\\s*\\{[^}]*?(display\\s*:\\s*none|visibility\\s*:\\s*hidden)`, 'i');
+    return styleTags.some(t => rx.test(t));
+  };
+  const isInlineHidden = (el) => {
+    const st = (el.getAttribute('style') || '').toLowerCase();
+    return /display\s*:\s*none|visibility\s*:\s*hidden/.test(st);
+  };
+  const isAttrHidden = (el) => el.hasAttribute('hidden') || (el.getAttribute('aria-hidden') || '').toLowerCase() === 'true';
+  const isUtilityHidden = (el) => {
+    const c = (el.className || '').toString();
+    return /\bd-(?:sm|md|lg|xl|xxl)-none\b|\bd-none\b|\bhidden\b|\bhide\b/i.test(c);
+  };
   const out = [];
   for (const el of roots) {
-    const cs = getComputedStyle(el);
-    const cls = (el.className || '').toString();
-    const byStyle = cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0';
-    const byClass = /\bd-none\b/i.test(cls) || /\bd-(?:sm|md|lg|xl|xxl)-none\b/i.test(cls);
-    if (byStyle || byClass) {
-      const id = el.getAttribute('data-fragment-entry-link-id') || el.id || '';
-      const label = (el.querySelector('h1,h2,h3,h4,h5,h6,a,span,p')?.textContent || '').trim().slice(0,60);
-      out.push(`${id || el.tagName.toLowerCase()}:${label}`);
+    const id = el.id || el.getAttribute('data-fragment-entry-link-id') || '';
+    if (isAttrHidden(el) || isInlineHidden(el) || hasDirectRule(id)) {
+      if (!isUtilityHidden(el)) {
+        const label = (el.querySelector('h1,h2,h3,h4,h5,h6,a,span,p')?.textContent || '').trim().slice(0,60);
+        out.push(`${id || el.tagName.toLowerCase()}:${label}`);
+      }
     }
   }
   return out;
 }");
 result.Checks.Add(new(
-  "Fragmenty skryté očíčkem v LFR (obsah, bez navigace/footeru atd...)",
+  "Fragmenty skryté očíčkem v LFR (obsah, bez navigace/footeru)",
   hiddenFragmentRoots.Length == 0,
   hiddenFragmentRoots.Length == 0 ? "OK" : $"Bobínkové našli: {hiddenFragmentRoots.Length} e.g. {string.Join(" | ", hiddenFragmentRoots.Take(3))}"
 ));
+
 
 
 
