@@ -182,56 +182,31 @@ public static class Auditor
         result.Checks.Add(new("Odkazy vedoucí na /not-found", notFoundLinks == 0, notFoundLinks == 0 ? "OK" : $"Našli jsme {notFoundLinks}"));
 
 
-var hiddenFragments = await page.EvaluateAsync<string[]>(@"
+var hiddenFragmentRoots = await page.EvaluateAsync<string[]>(@"
 () => {
-  const containers = document.querySelectorAll('main, [role=""main""], #main-content');
-  const scope = containers.length ? containers : [document.body];
-  const isHiddenDeep = (el) => {
-    let n = el;
-    while (n && n !== document.body) {
-      if (n.hasAttribute('hidden')) return true;
-      if ((n.getAttribute('aria-hidden') || '').toLowerCase() === 'true') return true;
-      const cs = getComputedStyle(n);
-      if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return true;
-      n = n.parentElement;
-    }
-    return false;
-  };
-  const skip = (el) => !!el.closest('header, footer, nav, [role=""navigation""]');
-  const roots = [];
-  for (const root of scope) {
-    root.querySelectorAll('[data-fragment-entry-link-id], div[id^=""fragment-""]').forEach(n => { if (!skip(n)) roots.push(n); });
-  }
-  const out = new Set();
-  const add = (el) => {
-    const id = el.getAttribute('data-lfr-editable-id') || el.id || '';
-    const cls = (el.className || '').toString().trim().split(/\s+/).slice(0,3).join('.');
-    const tag = el.tagName.toLowerCase();
-    out.add(`<${tag}${id?`#${id}`:''}${cls?`.${cls}`:''}>`);
-  };
-  for (const root of roots) {
-    const targetNodes = [root, ...root.querySelectorAll('*')];
-    for (const el of targetNodes) {
-      if (skip(el)) continue;
-      if (!el.closest('[data-fragment-entry-link-id], div[id^=""fragment-""]')) continue;
-      const cls = (el.className || '').toString();
-      const style = (el.getAttribute('style') || '').toLowerCase();
-      if (el.hasAttribute('hidden')) { add(el); continue; }
-      if ((el.getAttribute('aria-hidden') || '').toLowerCase() === 'true') { add(el); continue; }
-      if (/\bd-none\b/i.test(cls) || /\bd-(?:sm|md|lg|xl|xxl)-none\b/i.test(cls) || /\bhidden\b/i.test(cls) || /\bhide\b/i.test(cls)) { add(el); continue; }
-      if (style.includes('display:none') || style.includes('visibility:hidden') || /opacity\s*:\s*0(\.0+)?/.test(style)) { add(el); continue; }
-      if (isHiddenDeep(el)) { add(el); continue; }
-      const r = el.getBoundingClientRect();
-      if ((r.width === 0 && r.height === 0) || el.offsetParent === null) { add(el); continue; }
+  const scope = document.querySelector('main, [role=""main""], #main-content') || document.body;
+  const roots = Array.from(scope.querySelectorAll('[data-fragment-entry-link-id], div[id^=""fragment-""]'))
+    .filter(el => !el.closest('header, footer, nav, [role=""navigation""]'));
+  const out = [];
+  for (const el of roots) {
+    const cs = getComputedStyle(el);
+    const cls = (el.className || '').toString();
+    const byStyle = cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0';
+    const byClass = /\bd-none\b/i.test(cls) || /\bd-(?:sm|md|lg|xl|xxl)-none\b/i.test(cls);
+    if (byStyle || byClass) {
+      const id = el.getAttribute('data-fragment-entry-link-id') || el.id || '';
+      const label = (el.querySelector('h1,h2,h3,h4,h5,h6,a,span,p')?.textContent || '').trim().slice(0,60);
+      out.push(`${id || el.tagName.toLowerCase()}:${label}`);
     }
   }
-  return Array.from(out);
+  return out;
 }");
 result.Checks.Add(new(
-  "Skryté fragmenty uživatelem (obsah, bez navigace/footeru a tamtý nějaký editační mezivstvy)",
-  hiddenFragments.Length == 0,
-  hiddenFragments.Length == 0 ? "OK" : $"Bobínkové našli: {hiddenFragments.Length} e.g. {string.Join(" | ", hiddenFragments.Take(3))}"
+  "Fragmenty skryté očíčkem v LFR (obsah, bez navigace/footeru atd...)",
+  hiddenFragmentRoots.Length == 0,
+  hiddenFragmentRoots.Length == 0 ? "OK" : $"Bobínkové našli: {hiddenFragmentRoots.Length} e.g. {string.Join(" | ", hiddenFragmentRoots.Take(3))}"
 ));
+
 
 
 
